@@ -586,6 +586,7 @@ with st.sidebar:
         "Go to",
         [
             "🏠 Home",
+            "🌱 Crop Advisor",
             "👨‍🌾 Add Farmer",
             "🛒 Add Buyer",
             "🌾 Add Listing",
@@ -736,6 +737,237 @@ if page == "🏠 Home":
     
     with col_info2:
         st.success("✅ **Ready to go**\n\nYour marketplace is fully set up and ready to connect farmers with buyers. Create your first listing today!")
+
+
+# ============================================================
+# CROP ADVISOR - SOIL BASED RECOMMENDATIONS
+# ============================================================
+
+elif page == "🌱 Crop Advisor":
+
+    st.markdown('<div class="section-label">🌱 Crop Advisor</div>', unsafe_allow_html=True)
+    st.header("Smart Crop Recommendation", anchor=False)
+    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Enter your soil parameters and we'll suggest the best crops to plant — based on soil suitability, weather, and estimated revenue.</p>", unsafe_allow_html=True)
+
+    CROPS = [
+        {
+            "name": "Rice",
+            "season": ["Kharif", "Rabi"],
+            "ph": (5.0, 7.5),
+            "moisture": (40, 100),
+            "n": (2.5, 5.0), "p": (2.0, 4.0), "k": (2.0, 4.0),
+            "temp": (20, 38),
+            "revenue": "₹60,000–₹1,20,000 / ha",
+            "market": "Stable, government-backed MSP",
+        },
+        {
+            "name": "Wheat",
+            "season": ["Rabi"],
+            "ph": (6.0, 8.0),
+            "moisture": (30, 60),
+            "n": (2.5, 5.0), "p": (2.0, 4.0), "k": (2.0, 4.0),
+            "temp": (15, 28),
+            "revenue": "₹55,000–₹95,000 / ha",
+            "market": "Stable, strong demand",
+        },
+        {
+            "name": "Maize",
+            "season": ["Kharif", "Rabi"],
+            "ph": (5.5, 7.5),
+            "moisture": (40, 80),
+            "n": (3.0, 5.0), "p": (2.0, 4.0), "k": (2.0, 4.0),
+            "temp": (18, 32),
+            "revenue": "₹70,000–₹1,20,000 / ha",
+            "market": "Rising demand for feed & ethanol",
+        },
+        {
+            "name": "Sugarcane",
+            "season": ["Kharif", "Rabi"],
+            "ph": (6.0, 8.0),
+            "moisture": (50, 90),
+            "n": (3.0, 5.0), "p": (2.0, 4.0), "k": (3.0, 5.0),
+            "temp": (25, 35),
+            "revenue": "₹1,50,000–₹2,50,000 / ha",
+            "market": "Long-duration, seasonal pricing",
+        },
+        {
+            "name": "Groundnut",
+            "season": ["Kharif", "Rabi"],
+            "ph": (6.0, 7.0),
+            "moisture": (30, 60),
+            "n": (1.5, 3.0), "p": (2.0, 4.0), "k": (2.0, 4.0),
+            "temp": (24, 32),
+            "revenue": "₹50,000–₹90,000 / ha",
+            "market": "Good for light soils, oilseed demand",
+        },
+        {
+            "name": "Cotton",
+            "season": ["Kharif"],
+            "ph": (6.0, 8.0),
+            "moisture": (40, 70),
+            "n": (2.5, 4.5), "p": (2.0, 4.0), "k": (2.5, 4.5),
+            "temp": (25, 35),
+            "revenue": "₹1,00,000–₹1,80,000 / ha",
+            "market": "Input-sensitive, volatile but high return",
+        },
+        {
+            "name": "Tomato",
+            "season": ["Kharif", "Rabi"],
+            "ph": (6.0, 7.0),
+            "moisture": (50, 80),
+            "n": (2.5, 4.5), "p": (2.0, 4.0), "k": (2.5, 4.5),
+            "temp": (20, 30),
+            "revenue": "₹90,000–₹2,00,000 / ha",
+            "market": "High-value vegetable, volatile",
+        },
+        {
+            "name": "Onion",
+            "season": ["Rabi"],
+            "ph": (6.0, 7.5),
+            "moisture": (40, 70),
+            "n": (2.0, 4.0), "p": (2.0, 4.0), "k": (2.0, 4.0),
+            "temp": (20, 30),
+            "revenue": "₹80,000–₹1,50,000 / ha",
+            "market": "Price spikes common, storage potential",
+        },
+        {
+            "name": "Black Pepper",
+            "season": ["Kharif", "Arable (perennial)"],
+            "ph": (5.0, 6.5),
+            "moisture": (60, 90),
+            "n": (2.0, 4.0), "p": (1.5, 3.0), "k": (2.0, 4.0),
+            "temp": (20, 30),
+            "revenue": "₹2,00,000–₹4,00,000 / ha",
+            "market": "Premium spice, strong export demand",
+        },
+        {
+            "name": "Coconut",
+            "season": ["Perennial"],
+            "ph": (5.5, 7.5),
+            "moisture": (50, 90),
+            "n": (2.0, 4.0), "p": (1.5, 3.0), "k": (2.0, 4.0),
+            "temp": (25, 33),
+            "revenue": "₹80,000–₹1,40,000 / ha",
+            "market": "Steady income per tree, long term",
+        },
+        {
+            "name": "Rubber",
+            "season": ["Perennial"],
+            "ph": (4.5, 6.5),
+            "moisture": (60, 90),
+            "n": (2.0, 3.5), "p": (1.5, 2.5), "k": (2.0, 3.5),
+            "temp": (22, 34),
+            "revenue": "₹60,000–₹1,00,000 / ha/yr",
+            "market": "Export commodity, price follows global",
+        },
+    ]
+
+    SEASONS = ["Kharif", "Rabi", "Zaid", "Perennial"]
+
+    with st.form("crop_form"):
+
+        col1, col2 = st.columns(2, gap="large")
+        with col1:
+            soil_ph = st.slider("Soil pH", 3.5, 9.0, 6.5, 0.1)
+            st.caption("Most crops prefer 6.0–7.5")
+        with col2:
+            soil_moisture = st.slider("Soil Moisture (%)", 0, 100, 50)
+            st.caption("Field capacity moisture level")
+
+        col3, col4, col5 = st.columns(3, gap="large")
+        with col3:
+            soil_n = st.slider("Nitrogen (N)", 1.0, 5.0, 3.0, 0.1)
+            st.caption("kg/acre target")
+        with col4:
+            soil_p = st.slider("Phosphorus (P)", 1.0, 5.0, 3.0, 0.1)
+            st.caption("kg/acre target")
+        with col5:
+            soil_k = st.slider("Potassium (K)", 1.0, 5.0, 3.0, 0.1)
+            st.caption("kg/acre target")
+
+        col6, col7 = st.columns(2, gap="large")
+        with col6:
+            soil_temp = st.slider("Average Temperature (°C)", 5, 45, 28)
+            st.caption("Seasonal average")
+        with col7:
+            season = st.selectbox("Season", SEASONS)
+            st.caption("Sowing season")
+
+        st.write("")
+        submitted = st.form_submit_button("🌱 Get Crop Recommendations", use_container_width=True)
+
+    if submitted:
+
+        def in_range(value, rng):
+            return rng[0] <= value <= rng[1]
+
+        scored = []
+        for crop in CROPS:
+            is_perennial = "Perennial" in crop["season"]
+            if season not in crop["season"] and not is_perennial:
+                continue
+            score = 0
+            reasons = []
+            checks = [
+                ("pH", soil_ph, crop["ph"]),
+                ("Moisture", soil_moisture, crop["moisture"]),
+                ("Nitrogen (N)", soil_n, crop["n"]),
+                ("Phosphorus (P)", soil_p, crop["p"]),
+                ("Potassium (K)", soil_k, crop["k"]),
+                ("Temperature", soil_temp, crop["temp"]),
+            ]
+            for label, val, rng in checks:
+                if in_range(val, rng):
+                    score += 1
+                else:
+                    reasons.append(f"{label} {val} is outside the ideal {rng[0]}–{rng[1]}")
+
+            if score >= 4:
+                scored.append((score, crop, reasons))
+
+        if not scored:
+            st.warning("😕 No crops match your current soil conditions well. Try adjusting the inputs, or consider soil amendment (liming for low pH, compost for low N/P/K).")
+        else:
+            scored.sort(key=lambda x: x[0], reverse=True)
+
+            top_score = min(scored[0][0], 5)
+            st.markdown(
+                f"<div style='margin: 20px 0 10px 0;'><p style='font-size: 15px; font-weight: 800; color: var(--agri-green); text-transform: uppercase; letter-spacing: 1.2px; margin: 0;'>Top {top_score} candidates for {season} season</p></div>",
+                unsafe_allow_html=True,
+            )
+
+            for i, (score, crop, reasons) in enumerate(scored[:5], start=1):
+
+                match_pct = int(round(score / 6 * 100))
+
+                st.markdown(f"""
+                <div style="padding: 20px; border-radius: 12px; border: 1px solid #DDEBDD; background: #FFFFFF; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 22px; font-weight: 700; color: #1B5E20;">{i}. {crop['name']}</div>
+                            <div style="color: #666; margin-top: 4px; font-size: 15px;">Season: {', '.join(crop['season'])} • {match_pct}% match</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 15px; color: #2E7D32; font-weight: 700;">Estimated Revenue</div>
+                            <div style="font-size: 18px; font-weight: 800; color: #1B5E20;">{crop['revenue']}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 12px; padding: 12px; background: #E8F5E9; border-radius: 8px; font-size: 14px; color: #333;">
+                        <strong>Market Outlook:</strong> {crop['market']}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if reasons:
+                    with st.expander(f"Why not perfect for {crop['name']}"):
+                        for r in reasons:
+                            st.markdown(f"- {r}")
+
+            st.markdown("""
+            <div style='padding: 16px; background: #F1F8F3; border-left: 4px solid #2E7D32; border-radius: 8px; margin-top: 10px;'>
+                <strong>💡 Tip:</strong> For better yields, correct your soil to the ideal range shown and re-check. Always verify local market prices before sowing.
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ============================================================

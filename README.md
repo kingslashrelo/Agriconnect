@@ -27,8 +27,12 @@ Edit `.env` and set:
 
 ```
 SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_KEY=your-service-role-key
+SUPABASE_KEY=your-secret-key
 ```
+
+- `SUPABASE_URL` — your Project URL (Settings → API).
+- `SUPABASE_KEY` — use your **secret key** (the new `sb_secret_...` key replaces the old `service_role` key). This key bypasses Row Level Security so all tables work out of the box. Because the app runs server-side inside Streamlit (the key lives only in `.env` / Streamlit secrets, never the browser), this is safe for a learning project.
+- For a locally-hosted Supabase that still shows legacy keys, the old `service_role` key also works here.
 
 `.env` is git-ignored — never commit it.
 
@@ -44,8 +48,15 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## Features
+
+- **Crop Advisor** — enter soil parameters (pH, moisture, N/P/K, temperature, season) and get recommended crops with estimated revenue and market outlook from a built-in agronomy knowledge base.
+- Farmer / buyer registration with input validation.
+- Produce listings with automatic stock tracking (trigger decrements quantity on order).
+- Order placement, active listings board, and analytics reports.
+
 ---
 
 ### If you need to grant the anon key access instead
 
-The app works best with the service role key. If you would rather use the anon key, enable Row Level Security on each table and add policies, or temporarily disable RLS for the tables.
+The app works best with a secret / service role key. If you would rather use the anon/publishable key, enable Row Level Security on each table and add policies, or temporarily disable RLS for the tables.
