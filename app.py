@@ -1,30 +1,41 @@
 import os
-import psycopg2
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from supabase import create_client
 
 load_dotenv()
 
 
 # ============================================================
-# DATABASE
+# DATABASE (Supabase / PostgREST)
 # ============================================================
 
-def get_connection():
-    return psycopg2.connect(os.environ["NEON_DATABASE_URL"])
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def run_query(query, params=None):
-    with get_connection() as conn:
-        return pd.read_sql(query, conn, params=params)
+def to_df(rows):
+    return pd.DataFrame(rows or [])
 
 
-def run_write(query, params=None):
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-        conn.commit()
+def fetch_all(table, columns="*", order_by=None):
+    query = supabase.from_(table).select(columns)
+    if order_by:
+        query = query.order(order_by)
+    return query.execute().data
+
+
+def fetch_eq(table, column, value, columns="*", order_by=None):
+    query = supabase.from_(table).select(columns).eq(column, value)
+    if order_by:
+        query = query.order(order_by)
+    return query.execute().data
+
+
+def insert_row(table, payload):
+    return supabase.from_(table).insert(payload).execute()
 
 
 # ============================================================
@@ -423,9 +434,14 @@ elif page == "Add Farmer":
 
         if submitted:
 
-            run_write(
-                "INSERT INTO farmers (name, village, contact, primary_crop) VALUES (%s, %s, %s, %s)",
-                (name, village, contact, crop),
+            insert_row(
+                "farmers",
+                {
+                    "name": name,
+                    "village": village,
+                    "contact": contact,
+                    "primary_crop": crop,
+                },
             )
 
             st.success(f"Added farmer {name}")
@@ -491,9 +507,14 @@ elif page == "Add Buyer":
 
         if submitted:
 
-            run_write(
-                "INSERT INTO buyers (name, buyer_type, location, contact) VALUES (%s, %s, %s, %s)",
-                (name, buyer_type, location, contact),
+            insert_row(
+                "buyers",
+                {
+                    "name": name,
+                    "buyer_type": buyer_type,
+                    "location": location,
+                    "contact": contact,
+                },
             )
 
             st.success(f"Added buyer {name}")
@@ -512,8 +533,8 @@ elif page == "Add Listing":
 
     st.header("🌾 List Produce")
 
-    farmers = run_query(
-        "SELECT farmer_id, name FROM farmers ORDER BY name"
+    farmers = to_df(
+        fetch_all("farmers", "farmer_id, name", order_by="name")
     )
 
     if farmers.empty:
@@ -585,19 +606,16 @@ elif page == "Add Listing":
 
             if submitted:
 
-                run_write(
-                    """INSERT INTO listings
-                       (farmer_id, crop_name, quantity,
-                        unit, price_per_unit, harvest_date)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
-                    (
-                        farmer_id,
-                        crop_name,
-                        quantity,
-                        unit,
-                        price,
-                        harvest_date,
-                    ),
+                insert_row(
+                    "listings",
+                    {
+                        "farmer_id": farmer_id,
+                        "crop_name": crop_name,
+                        "quantity": quantity,
+                        "unit": unit,
+                        "price_per_unit": price,
+                        "harvest_date": str(harvest_date),
+                    },
                 )
 
                 st.success(
@@ -618,16 +636,16 @@ elif page == "Place Order":
 
     st.header("📦 Place an Order")
 
-    buyers = run_query(
-        "SELECT buyer_id, name FROM buyers ORDER BY name"
+    buyers = to_df(
+        fetch_all("buyers", "buyer_id, name", order_by="name")
     )
 
-    listings = run_query(
-        """SELECT l.listing_id, f.name AS farmer_name, l.crop_name,
-                  l.quantity, l.price_per_unit
-           FROM listings l JOIN farmers f
-           ON l.farmer_id = f.farmer_id
-           WHERE l.status = 'available'"""
+    listings = to_df(
+        fetch_all(
+            "active_listings_view",
+            "listing_id, farmer_name, crop_name, quantity, price_per_unit",
+            order_by="farmer_name",
+        )
     )
 
     if buyers.empty or listings.empty:
@@ -711,13 +729,13 @@ elif page == "Place Order":
 
             if submitted:
 
-                run_write(
-                    "INSERT INTO orders (buyer_id, listing_id, quantity_ordered) VALUES (%s, %s, %s)",
-                    (
-                        buyer_id,
-                        listing_id,
-                        qty,
-                    ),
+                insert_row(
+                    "orders",
+                    {
+                        "buyer_id": buyer_id,
+                        "listing_id": listing_id,
+                        "quantity_ordered": qty,
+                    },
                 )
 
                 st.success(
@@ -738,8 +756,12 @@ elif page == "Active Listings":
 
     st.header("🌱 Active Listings")
 
-    listings = run_query(
-        "SELECT * FROM active_listings_view ORDER BY harvest_date"
+    listings = to_df(
+        fetch_all(
+            "active_listings_view",
+            "*",
+            order_by="harvest_date",
+        )
     )
 
     if listings.empty:
@@ -789,8 +811,8 @@ elif page == "Reports":
 
     if report == "Revenue per farmer":
 
-        farmers = run_query(
-            "SELECT farmer_id, name FROM farmers ORDER BY name"
+        farmers = to_df(
+            fetch_all("farmers", "farmer_id, name", order_by="name")
         )
 
         if farmers.empty:
@@ -811,11 +833,12 @@ elif page == "Reports":
                 ].iloc[0]
             )
 
+            revenue = supabase.rpc(
+                "get_farmer_revenue", {"p_farmer_id": farmer_id}
+            ).execute().data
+
             st.dataframe(
-                run_query(
-                    "SELECT * FROM get_farmer_revenue(%s)",
-                    (farmer_id,),
-                ),
+                to_df(revenue),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -828,13 +851,8 @@ elif page == "Reports":
     elif report == "Most active buyers":
 
         st.dataframe(
-            run_query(
-                """SELECT b.name, COUNT(o.order_id) AS total_orders,
-                          SUM(o.quantity_ordered) AS total_volume
-                   FROM buyers b JOIN orders o
-                   ON b.buyer_id = o.buyer_id
-                   GROUP BY b.name
-                   ORDER BY total_volume DESC"""
+            to_df(
+                fetch_all("most_active_buyers_view", "*")
             ),
             use_container_width=True,
             hide_index=True,
@@ -853,13 +871,14 @@ elif page == "Reports":
         )
 
         st.dataframe(
-            run_query(
-                """SELECT crop_name, record_date,
-                          avg_market_price
-                   FROM price_history
-                   WHERE crop_name = %s
-                   ORDER BY record_date""",
-                (crop,),
+            to_df(
+                fetch_eq(
+                    "price_history",
+                    "crop_name",
+                    crop,
+                    "crop_name, record_date, avg_market_price",
+                    order_by="record_date",
+                )
             ),
             use_container_width=True,
             hide_index=True,
@@ -873,14 +892,8 @@ elif page == "Reports":
     elif report == "Unsold stock (15+ days)":
 
         st.dataframe(
-            run_query(
-                """SELECT f.name, l.crop_name,
-                          l.quantity, l.harvest_date
-                   FROM listings l JOIN farmers f
-                   ON l.farmer_id = f.farmer_id
-                   WHERE l.status = 'available'
-                   AND l.harvest_date <
-                   CURRENT_DATE - INTERVAL '15 days'"""
+            to_df(
+                fetch_all("unsold_stock_view", "*")
             ),
             use_container_width=True,
             hide_index=True,
@@ -894,19 +907,8 @@ elif page == "Reports":
     elif report == "Average farmer rating":
 
         st.dataframe(
-            run_query(
-                """SELECT f.name,
-                          AVG(r.score) AS avg_rating,
-                          COUNT(r.rating_id) AS num_ratings
-                   FROM farmers f
-                   JOIN listings l
-                   ON f.farmer_id = l.farmer_id
-                   JOIN orders o
-                   ON l.listing_id = o.listing_id
-                   JOIN ratings r
-                   ON o.order_id = r.order_id
-                   GROUP BY f.name
-                   ORDER BY avg_rating DESC"""
+            to_df(
+                fetch_all("farmer_avg_rating_view", "*")
             ),
             use_container_width=True,
             hide_index=True,
@@ -920,17 +922,8 @@ elif page == "Reports":
     elif report == "Pending payments":
 
         st.dataframe(
-            run_query(
-                """SELECT o.order_id,
-                          b.name AS buyer,
-                          p.amount,
-                          p.status
-                   FROM orders o
-                   JOIN buyers b
-                   ON o.buyer_id = b.buyer_id
-                   JOIN payments p
-                   ON o.order_id = p.order_id
-                   WHERE p.status = 'pending'"""
+            to_df(
+                fetch_all("pending_payments_view", "*")
             ),
             use_container_width=True,
             hide_index=True,
