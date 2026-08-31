@@ -737,7 +737,7 @@ if page == "🏠 Home":
 
     st.markdown("<div style='margin-top: 40px;'></div>", unsafe_allow_html=True)
 
-    col_info1, col_info2 = st.columns([1, 1])
+    col_info1, col_info2 = st.columns([1, 1], gap="large")
     with col_info1:
         st.info("📌 **Getting Started**\n\nUse the navigation menu on the left to get started. Start by registering farmers and buyers, then create listings and place orders.")
     
@@ -999,7 +999,7 @@ elif page == "🌾 Add Listing":
 
             # Summary
             st.markdown("<div style='margin: 20px 0; padding: 16px; background: var(--agri-green-light); border-radius: 12px;'>", unsafe_allow_html=True)
-            col_sum1, col_sum2 = st.columns(2)
+            col_sum1, col_sum2 = st.columns(2, gap="large")
             with col_sum1:
                 st.metric("Total Value (₹)", f"₹ {quantity * price:,.2f}")
             with col_sum2:
@@ -1218,7 +1218,7 @@ elif page == "📋 Active Listings":
 
     else:
         # Stats
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        col_stat1, col_stat2, col_stat3 = st.columns(3, gap="large")
         
         with col_stat1:
             st.metric("Total Listings", len(listings))
@@ -1306,7 +1306,7 @@ elif page == "📊 Reports":
                 if revenue_df.empty:
                     st.info(f"✅ {farmer} has no revenue yet.")
                 else:
-                    col_rev1, col_rev2 = st.columns(2)
+                    col_rev1, col_rev2 = st.columns(2, gap="large")
                     with col_rev1:
                         total = revenue_df.get("total_revenue", pd.Series([0])).sum() if "total_revenue" in revenue_df.columns else 0
                         st.metric("Total Revenue (₹)", f"₹ {total:,.2f}")
@@ -1338,7 +1338,7 @@ elif page == "📊 Reports":
             if buyers_df.empty:
                 st.info("📭 No buyer activity yet.")
             else:
-                col_buy1, col_buy2, col_buy3 = st.columns(3)
+                col_buy1, col_buy2, col_buy3 = st.columns(3, gap="large")
                 with col_buy1:
                     top_buyer = buyers_df.iloc[0]["name"] if len(buyers_df) > 0 else "—"
                     st.metric("Top Buyer", top_buyer)
@@ -1388,7 +1388,7 @@ elif page == "📊 Reports":
                     min_price = price_data["avg_market_price"].min()
                     max_price = price_data["avg_market_price"].max()
                     
-                    col_price1, col_price2, col_price3 = st.columns(3)
+                    col_price1, col_price2, col_price3 = st.columns(3, gap="large")
                     with col_price1:
                         st.metric("Current Price (₹)", f"₹ {current_price:,.2f}")
                     with col_price2:
@@ -1424,7 +1424,7 @@ elif page == "📊 Reports":
             if unsold_data.empty:
                 st.success("✅ No old unsold stock found!")
             else:
-                col_unsold1, col_unsold2 = st.columns(2)
+                col_unsold1, col_unsold2 = st.columns(2, gap="large")
                 with col_unsold1:
                     st.metric("Unsold Items", len(unsold_data))
                 with col_unsold2:
@@ -1462,7 +1462,7 @@ elif page == "📊 Reports":
                     top_rating = rating_df.iloc[0]["avg_rating"] if len(rating_df) > 0 else 0
                     avg_rating_overall = rating_df["avg_rating"].mean()
                     
-                    col_rating1, col_rating2 = st.columns(2)
+                    col_rating1, col_rating2 = st.columns(2, gap="large")
                     with col_rating1:
                         st.metric("Highest Rating", f"⭐ {top_rating:.2f}")
                     with col_rating2:
@@ -1499,7 +1499,7 @@ elif page == "📊 Reports":
                 pending_count = len(payment_data)
                 total_pending = payment_data.get("amount", pd.Series()).sum() if "amount" in payment_data.columns else 0
                 
-                col_pay1, col_pay2 = st.columns(2)
+                col_pay1, col_pay2 = st.columns(2, gap="large")
                 with col_pay1:
                     st.metric("Pending Payments", pending_count)
                 with col_pay2:
