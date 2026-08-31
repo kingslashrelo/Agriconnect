@@ -1227,48 +1227,45 @@ elif page == "📋 Active Listings":
 # REPORTS
 # ============================================================
 
-elif page == "Reports":
+elif page == "📊 Reports":
 
-    st.markdown(
-        '<div class="section-label">Analytics</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.header("📊 Reports & Analytics")
+    st.markdown('<div class="section-label">📊 Analytics</div>', unsafe_allow_html=True)
+    st.header("Reports & Analytics", anchor=False)
+    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>View comprehensive insights and analytics about your marketplace activity.</p>", unsafe_allow_html=True)
 
     report = st.selectbox(
         "Choose a report",
         [
-            "Revenue per farmer",
-            "Most active buyers",
-            "Price trend",
-            "Unsold stock (15+ days)",
-            "Average farmer rating",
-            "Pending payments",
+            "📈 Revenue per Farmer",
+            "🏆 Most Active Buyers",
+            "💹 Price Trend",
+            "📦 Unsold Stock (15+ days)",
+            "⭐ Average Farmer Rating",
+            "💰 Pending Payments",
         ],
     )
+
+    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
 
 
     # --------------------------------------------------------
     # Revenue per farmer
     # --------------------------------------------------------
 
-    if report == "Revenue per farmer":
+    if report == "📈 Revenue per Farmer":
 
         farmers = run_query(
             "SELECT farmer_id, name FROM farmers ORDER BY name"
         )
 
         if farmers.empty:
-
-            st.info("No farmers available.")
-
+            st.info("📭 No farmers available.")
         else:
-
             farmer = st.selectbox(
-                "Farmer",
+                "Select Farmer",
                 farmers["name"],
             )
+            st.caption("Choose a farmer to view their revenue details")
 
             farmer_id = int(
                 farmers.loc[
@@ -1277,128 +1274,270 @@ elif page == "Reports":
                 ].iloc[0]
             )
 
-            st.dataframe(
-                run_query(
-                    "SELECT * FROM get_farmer_revenue(%s)",
-                    (farmer_id,),
-                ),
-                use_container_width=True,
-                hide_index=True,
+            revenue_data = run_query(
+                "SELECT * FROM get_farmer_revenue(%s)",
+                (farmer_id,),
             )
+
+            if revenue_data.empty:
+                st.info(f"✅ {farmer} has no revenue yet.")
+            else:
+                total_revenue = revenue_data.get("total_revenue", pd.Series([0])).sum()
+                col_rev1, col_rev2 = st.columns(2)
+                with col_rev1:
+                    st.metric("Total Revenue (₹)", f"₹ {total_revenue:,.2f}")
+                with col_rev2:
+                    st.metric("Transactions", len(revenue_data))
+                
+                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                
+                st.dataframe(
+                    revenue_data,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "amount": st.column_config.NumberColumn(
+                            label="Amount (₹)",
+                            format="₹%,.2f"
+                        ),
+                    } if "amount" in revenue_data.columns else {}
+                )
 
 
     # --------------------------------------------------------
     # Most active buyers
     # --------------------------------------------------------
 
-    elif report == "Most active buyers":
+    elif report == "🏆 Most Active Buyers":
 
-        st.dataframe(
-            run_query(
-                """SELECT b.name, COUNT(o.order_id) AS total_orders,
-                          SUM(o.quantity_ordered) AS total_volume
-                   FROM buyers b JOIN orders o
-                   ON b.buyer_id = o.buyer_id
-                   GROUP BY b.name
-                   ORDER BY total_volume DESC"""
-            ),
-            use_container_width=True,
-            hide_index=True,
+        buyers_data = run_query(
+            """SELECT b.name, COUNT(o.order_id) AS total_orders,
+                      SUM(o.quantity_ordered) AS total_volume
+               FROM buyers b JOIN orders o
+               ON b.buyer_id = o.buyer_id
+               GROUP BY b.name
+               ORDER BY total_volume DESC"""
         )
+
+        if buyers_data.empty:
+            st.info("📭 No buyer activity yet.")
+        else:
+            col_buy1, col_buy2, col_buy3 = st.columns(3)
+            with col_buy1:
+                st.metric("Top Buyer", buyers_data.iloc[0]["name"] if len(buyers_data) > 0 else "—")
+            with col_buy2:
+                st.metric("Total Active Buyers", len(buyers_data))
+            with col_buy3:
+                avg_orders = buyers_data["total_orders"].mean()
+                st.metric("Avg Orders/Buyer", f"{avg_orders:.1f}")
+            
+            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+            
+            st.dataframe(
+                buyers_data,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "total_orders": st.column_config.NumberColumn(
+                        label="Orders",
+                        format="%d"
+                    ),
+                    "total_volume": st.column_config.NumberColumn(
+                        label="Volume",
+                        format="%.1f"
+                    ),
+                } if "total_orders" in buyers_data.columns else {}
+            )
 
 
     # --------------------------------------------------------
     # Price trend
     # --------------------------------------------------------
 
-    elif report == "Price trend":
+    elif report == "💹 Price Trend":
 
         crop = st.text_input(
-            "Crop name",
+            "Crop Name",
             value="Rubber Sheet",
+            placeholder="e.g., Rice, Wheat, Rubber Sheet",
+        )
+        st.caption("Enter the crop name to view price history")
+
+        price_data = run_query(
+            """SELECT crop_name, record_date,
+                      avg_market_price
+               FROM price_history
+               WHERE crop_name = %s
+               ORDER BY record_date""",
+            (crop,),
         )
 
-        st.dataframe(
-            run_query(
-                """SELECT crop_name, record_date,
-                          avg_market_price
-                   FROM price_history
-                   WHERE crop_name = %s
-                   ORDER BY record_date""",
-                (crop,),
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        if price_data.empty:
+            st.warning(f"⚠️ No price history found for '{crop}'.")
+        else:
+            current_price = price_data.iloc[-1]["avg_market_price"] if len(price_data) > 0 else 0
+            min_price = price_data["avg_market_price"].min()
+            max_price = price_data["avg_market_price"].max()
+            
+            col_price1, col_price2, col_price3 = st.columns(3)
+            with col_price1:
+                st.metric("Current Price (₹)", f"₹ {current_price:,.2f}")
+            with col_price2:
+                st.metric("Min Price (₹)", f"₹ {min_price:,.2f}")
+            with col_price3:
+                st.metric("Max Price (₹)", f"₹ {max_price:,.2f}")
+            
+            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+            
+            st.dataframe(
+                price_data,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "avg_market_price": st.column_config.NumberColumn(
+                        label="Price (₹)",
+                        format="₹%,.2f"
+                    ),
+                } if "avg_market_price" in price_data.columns else {}
+            )
 
 
     # --------------------------------------------------------
     # Unsold stock
     # --------------------------------------------------------
 
-    elif report == "Unsold stock (15+ days)":
+    elif report == "📦 Unsold Stock (15+ days)":
 
-        st.dataframe(
-            run_query(
-                """SELECT f.name, l.crop_name,
-                          l.quantity, l.harvest_date
-                   FROM listings l JOIN farmers f
-                   ON l.farmer_id = f.farmer_id
-                   WHERE l.status = 'available'
-                   AND l.harvest_date <
-                   CURRENT_DATE - INTERVAL '15 days'"""
-            ),
-            use_container_width=True,
-            hide_index=True,
+        unsold_data = run_query(
+            """SELECT f.name, l.crop_name,
+                      l.quantity, l.harvest_date
+               FROM listings l JOIN farmers f
+               ON l.farmer_id = f.farmer_id
+               WHERE l.status = 'available'
+               AND l.harvest_date <
+               CURRENT_DATE - INTERVAL '15 days'"""
         )
+
+        if unsold_data.empty:
+            st.success("✅ No old unsold stock found!")
+        else:
+            col_unsold1, col_unsold2 = st.columns(2)
+            with col_unsold1:
+                st.metric("Unsold Items", len(unsold_data))
+            with col_unsold2:
+                total_unsold_qty = unsold_data.get("quantity", pd.Series()).sum()
+                st.metric("Total Quantity", f"{total_unsold_qty:,.1f}")
+            
+            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+            st.warning("⚠️ These items have been unsold for more than 15 days.", icon="⚠️")
+            
+            st.dataframe(
+                unsold_data,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "quantity": st.column_config.NumberColumn(
+                        label="Quantity",
+                        format="%.1f"
+                    ),
+                } if "quantity" in unsold_data.columns else {}
+            )
 
 
     # --------------------------------------------------------
     # Average farmer rating
     # --------------------------------------------------------
 
-    elif report == "Average farmer rating":
+    elif report == "⭐ Average Farmer Rating":
 
-        st.dataframe(
-            run_query(
-                """SELECT f.name,
-                          AVG(r.score) AS avg_rating,
-                          COUNT(r.rating_id) AS num_ratings
-                   FROM farmers f
-                   JOIN listings l
-                   ON f.farmer_id = l.farmer_id
-                   JOIN orders o
-                   ON l.listing_id = o.listing_id
-                   JOIN ratings r
-                   ON o.order_id = r.order_id
-                   GROUP BY f.name
-                   ORDER BY avg_rating DESC"""
-            ),
-            use_container_width=True,
-            hide_index=True,
+        rating_data = run_query(
+            """SELECT f.name,
+                      AVG(r.score) AS avg_rating,
+                      COUNT(r.rating_id) AS num_ratings
+               FROM farmers f
+               JOIN listings l
+               ON f.farmer_id = l.farmer_id
+               JOIN orders o
+               ON l.listing_id = o.listing_id
+               JOIN ratings r
+               ON o.order_id = r.order_id
+               GROUP BY f.name
+               ORDER BY avg_rating DESC"""
         )
+
+        if rating_data.empty:
+            st.info("📭 No ratings available yet.")
+        else:
+            top_rating = rating_data.iloc[0]["avg_rating"] if len(rating_data) > 0 else 0
+            avg_rating_overall = rating_data["avg_rating"].mean()
+            
+            col_rating1, col_rating2 = st.columns(2)
+            with col_rating1:
+                st.metric("Highest Rating", f"⭐ {top_rating:.2f}")
+            with col_rating2:
+                st.metric("Avg Rating Overall", f"⭐ {avg_rating_overall:.2f}")
+            
+            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+            
+            st.dataframe(
+                rating_data,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "avg_rating": st.column_config.NumberColumn(
+                        label="Rating",
+                        format="⭐ %.2f"
+                    ),
+                    "num_ratings": st.column_config.NumberColumn(
+                        label="Ratings Count",
+                        format="%d"
+                    ),
+                } if "avg_rating" in rating_data.columns else {}
+            )
 
 
     # --------------------------------------------------------
     # Pending payments
     # --------------------------------------------------------
 
-    elif report == "Pending payments":
+    elif report == "💰 Pending Payments":
 
-        st.dataframe(
-            run_query(
-                """SELECT o.order_id,
-                          b.name AS buyer,
-                          p.amount,
-                          p.status
-                   FROM orders o
-                   JOIN buyers b
-                   ON o.buyer_id = b.buyer_id
-
-                   JOIN payments p
-                   ON o.order_id = p.order_id
-                   WHERE p.status = 'pending'"""
-            ),
-            use_container_width=True,
-            hide_index=True,
+        payment_data = run_query(
+            """SELECT o.order_id,
+                      b.name AS buyer,
+                      p.amount,
+                      p.status
+               FROM orders o
+               JOIN buyers b
+               ON o.buyer_id = b.buyer_id
+               JOIN payments p
+               ON o.order_id = p.order_id
+               WHERE p.status = 'pending'"""
         )
+
+        if payment_data.empty:
+            st.success("✅ No pending payments!")
+        else:
+            pending_count = len(payment_data)
+            total_pending = payment_data.get("amount", pd.Series()).sum()
+            
+            col_pay1, col_pay2 = st.columns(2)
+            with col_pay1:
+                st.metric("Pending Payments", pending_count)
+            with col_pay2:
+                st.metric("Total Amount (₹)", f"₹ {total_pending:,.2f}")
+            
+            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+            st.warning(f"⚠️ {pending_count} payment(s) pending collection.", icon="⚠️")
+            
+            st.dataframe(
+                payment_data,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "amount": st.column_config.NumberColumn(
+                        label="Amount (₹)",
+                        format="₹%,.2f"
+                    ),
+                } if "amount" in payment_data.columns else {}
+            )
