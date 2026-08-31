@@ -99,7 +99,7 @@ EXECUTE FUNCTION update_listing_after_order();
 -- Active listings with farmer details
 CREATE OR REPLACE VIEW active_listings_view AS
 SELECT l.listing_id, f.name AS farmer_name, f.village,
-       l.crop_name, l.quantity, l.price_per_unit, l.harvest_date
+       l.crop_name, l.quantity, l.unit, l.price_per_unit, l.harvest_date
 FROM listings l
 JOIN farmers f ON l.farmer_id = f.farmer_id
 WHERE l.status = 'available';
