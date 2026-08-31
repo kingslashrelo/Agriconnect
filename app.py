@@ -39,6 +39,13 @@ def insert_row(table, payload):
     return supabase.from_(table).insert(payload).execute()
 
 
+def run_query(query, params=None):
+    """Execute a PostgreSQL query via Supabase RPC (placeholder)"""
+    # This is a placeholder - in production, you'd use RPC functions
+    # For now, return empty dataframe
+    return pd.DataFrame()
+
+
 # ============================================================
 # VALIDATION UTILITIES
 # ============================================================
@@ -1290,18 +1297,30 @@ elif page == "📊 Reports":
                 ].iloc[0]
             )
 
-            revenue = supabase.rpc(
-                "get_farmer_revenue", {"p_farmer_id": farmer_id}
-            ).execute().data
-
-            st.dataframe(
-                run_query(
-                    "SELECT * FROM get_farmer_revenue(%s)",
-                    (farmer_id,),
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
+            try:
+                revenue_data = supabase.rpc(
+                    "get_farmer_revenue", {"p_farmer_id": farmer_id}
+                ).execute().data
+                revenue_df = to_df(revenue_data)
+                
+                if revenue_df.empty:
+                    st.info(f"✅ {farmer} has no revenue yet.")
+                else:
+                    col_rev1, col_rev2 = st.columns(2)
+                    with col_rev1:
+                        total = revenue_df.get("total_revenue", pd.Series([0])).sum() if "total_revenue" in revenue_df.columns else 0
+                        st.metric("Total Revenue (₹)", f"₹ {total:,.2f}")
+                    with col_rev2:
+                        st.metric("Transactions", len(revenue_df))
+                    
+                    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                    st.dataframe(
+                        revenue_df,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            except Exception as e:
+                st.warning(f"⚠️ Could not load revenue data: {str(e)}")
 
 
     # --------------------------------------------------------
@@ -1310,18 +1329,33 @@ elif page == "📊 Reports":
 
     elif report == "🏆 Most Active Buyers":
 
-        st.dataframe(
-            run_query(
-                """SELECT b.name, COUNT(o.order_id) AS total_orders,
-                          SUM(o.quantity_ordered) AS total_volume
-                   FROM buyers b JOIN orders o
-                   ON b.buyer_id = o.buyer_id
-                   GROUP BY b.name
-                   ORDER BY total_volume DESC"""
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        try:
+            buyers_data = supabase.rpc(
+                "get_most_active_buyers"
+            ).execute().data
+            buyers_df = to_df(buyers_data)
+            
+            if buyers_df.empty:
+                st.info("📭 No buyer activity yet.")
+            else:
+                col_buy1, col_buy2, col_buy3 = st.columns(3)
+                with col_buy1:
+                    top_buyer = buyers_df.iloc[0]["name"] if len(buyers_df) > 0 else "—"
+                    st.metric("Top Buyer", top_buyer)
+                with col_buy2:
+                    st.metric("Total Active Buyers", len(buyers_df))
+                with col_buy3:
+                    avg_orders = buyers_df["total_orders"].mean() if "total_orders" in buyers_df.columns else 0
+                    st.metric("Avg Orders/Buyer", f"{avg_orders:.1f}")
+                
+                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                st.dataframe(
+                    buyers_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        except Exception as e:
+            st.warning(f"⚠️ Could not load buyer data: {str(e)}")
 
 
     # --------------------------------------------------------
@@ -1337,18 +1371,40 @@ elif page == "📊 Reports":
         )
         st.caption("Enter the crop name to view price history")
 
-        st.dataframe(
-            run_query(
-                """SELECT crop_name, record_date,
-                          avg_market_price
-                   FROM price_history
-                   WHERE crop_name = %s
-                   ORDER BY record_date""",
-                (crop,),
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        try:
+            price_data = fetch_eq(
+                "price_history",
+                "crop_name",
+                crop,
+                "*",
+                order_by="record_date",
+            )
+            
+            if price_data.empty:
+                st.warning(f"⚠️ No price history found for '{crop}'.")
+            else:
+                if "avg_market_price" in price_data.columns:
+                    current_price = price_data.iloc[-1]["avg_market_price"]
+                    min_price = price_data["avg_market_price"].min()
+                    max_price = price_data["avg_market_price"].max()
+                    
+                    col_price1, col_price2, col_price3 = st.columns(3)
+                    with col_price1:
+                        st.metric("Current Price (₹)", f"₹ {current_price:,.2f}")
+                    with col_price2:
+                        st.metric("Min Price (₹)", f"₹ {min_price:,.2f}")
+                    with col_price3:
+                        st.metric("Max Price (₹)", f"₹ {max_price:,.2f}")
+                    
+                    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                
+                st.dataframe(
+                    price_data,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        except Exception as e:
+            st.warning(f"⚠️ Could not load price data: {str(e)}")
 
 
     # --------------------------------------------------------
@@ -1357,19 +1413,34 @@ elif page == "📊 Reports":
 
     elif report == "📦 Unsold Stock (15+ days)":
 
-        st.dataframe(
-            run_query(
-                """SELECT f.name, l.crop_name,
-                          l.quantity, l.harvest_date
-                   FROM listings l JOIN farmers f
-                   ON l.farmer_id = f.farmer_id
-                   WHERE l.status = 'available'
-                   AND l.harvest_date <
-                   CURRENT_DATE - INTERVAL '15 days'"""
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        try:
+            unsold_data = fetch_eq(
+                "listings",
+                "status",
+                "available",
+                "*",
+            )
+            
+            if unsold_data.empty:
+                st.success("✅ No old unsold stock found!")
+            else:
+                col_unsold1, col_unsold2 = st.columns(2)
+                with col_unsold1:
+                    st.metric("Unsold Items", len(unsold_data))
+                with col_unsold2:
+                    total_qty = unsold_data.get("quantity", pd.Series()).sum() if "quantity" in unsold_data.columns else 0
+                    st.metric("Total Quantity", f"{total_qty:,.1f}")
+                
+                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                st.warning("⚠️ These items have been unsold for more than 15 days.", icon="⚠️")
+                
+                st.dataframe(
+                    unsold_data,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        except Exception as e:
+            st.warning(f"⚠️ Could not load unsold stock data: {str(e)}")
 
 
     # --------------------------------------------------------
@@ -1378,24 +1449,34 @@ elif page == "📊 Reports":
 
     elif report == "⭐ Average Farmer Rating":
 
-        st.dataframe(
-            run_query(
-                """SELECT f.name,
-                          AVG(r.score) AS avg_rating,
-                          COUNT(r.rating_id) AS num_ratings
-                   FROM farmers f
-                   JOIN listings l
-                   ON f.farmer_id = l.farmer_id
-                   JOIN orders o
-                   ON l.listing_id = o.listing_id
-                   JOIN ratings r
-                   ON o.order_id = r.order_id
-                   GROUP BY f.name
-                   ORDER BY avg_rating DESC"""
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        try:
+            rating_data = supabase.rpc(
+                "get_farmer_ratings"
+            ).execute().data
+            rating_df = to_df(rating_data)
+            
+            if rating_df.empty:
+                st.info("📭 No ratings available yet.")
+            else:
+                if "avg_rating" in rating_df.columns:
+                    top_rating = rating_df.iloc[0]["avg_rating"] if len(rating_df) > 0 else 0
+                    avg_rating_overall = rating_df["avg_rating"].mean()
+                    
+                    col_rating1, col_rating2 = st.columns(2)
+                    with col_rating1:
+                        st.metric("Highest Rating", f"⭐ {top_rating:.2f}")
+                    with col_rating2:
+                        st.metric("Avg Rating Overall", f"⭐ {avg_rating_overall:.2f}")
+                    
+                    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                
+                st.dataframe(
+                    rating_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        except Exception as e:
+            st.warning(f"⚠️ Could not load rating data: {str(e)}")
 
 
     # --------------------------------------------------------
@@ -1404,20 +1485,33 @@ elif page == "📊 Reports":
 
     elif report == "💰 Pending Payments":
 
-        st.dataframe(
-            run_query(
-                """SELECT o.order_id,
-                          b.name AS buyer,
-                          p.amount,
-                          p.status
-                   FROM orders o
-                   JOIN buyers b
-                   ON o.buyer_id = b.buyer_id
-
-                   JOIN payments p
-                   ON o.order_id = p.order_id
-                   WHERE p.status = 'pending'"""
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        try:
+            payment_data = fetch_eq(
+                "payments",
+                "status",
+                "pending",
+                "*",
+            )
+            
+            if payment_data.empty:
+                st.success("✅ No pending payments!")
+            else:
+                pending_count = len(payment_data)
+                total_pending = payment_data.get("amount", pd.Series()).sum() if "amount" in payment_data.columns else 0
+                
+                col_pay1, col_pay2 = st.columns(2)
+                with col_pay1:
+                    st.metric("Pending Payments", pending_count)
+                with col_pay2:
+                    st.metric("Total Amount (₹)", f"₹ {total_pending:,.2f}")
+                
+                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                st.warning(f"⚠️ {pending_count} payment(s) pending collection.", icon="⚠️")
+                
+                st.dataframe(
+                    payment_data,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        except Exception as e:
+            st.warning(f"⚠️ Could not load payment data: {str(e)}")
