@@ -46,6 +46,42 @@ def run_query(query, params=None):
     return pd.DataFrame()
 
 
+def rpc(name, params):
+    """Call a Postgres function via PostgREST RPC."""
+    return supabase.rpc(name, params).execute()
+
+
+def recommend_crops(ph, moisture, n, p, k, temp, season):
+    """Score crops against soil/weather params using the DB crop engine."""
+    res = supabase.rpc(
+        "recommend_crops",
+        {
+            "p_ph": ph,
+            "p_moisture": moisture,
+            "p_n": n,
+            "p_p": p,
+            "p_k": k,
+            "p_temp": temp,
+            "p_season": season,
+        },
+    ).execute()
+    return to_df(res.data)
+
+
+def update_order_status(order_id, new_status, changed_by=None):
+    """Advance an order's lifecycle with validation + audit trail."""
+    params = {"p_order_id": order_id, "p_new_status": new_status}
+    if changed_by:
+        params["p_changed_by"] = changed_by
+    return supabase.rpc("update_order_status", params).execute()
+
+
+def get_farmer_revenue(farmer_id):
+    """Total paid revenue for a farmer (calls DB function via RPC)."""
+    res = supabase.rpc("get_farmer_revenue", {"p_farmer_id": farmer_id}).execute()
+    return to_df(res.data)
+
+
 # ============================================================
 # VALIDATION UTILITIES
 # ============================================================
@@ -908,29 +944,72 @@ elif page == "🌱 Crop Advisor":
         def in_range(value, rng):
             return rng[0] <= value <= rng[1]
 
-        scored = []
-        for crop in CROPS:
-            is_perennial = "Perennial" in crop["season"]
-            if season not in crop["season"] and not is_perennial:
-                continue
-            score = 0
-            reasons = []
-            checks = [
-                ("pH", soil_ph, crop["ph"]),
-                ("Moisture", soil_moisture, crop["moisture"]),
-                ("Nitrogen (N)", soil_n, crop["n"]),
-                ("Phosphorus (P)", soil_p, crop["p"]),
-                ("Potassium (K)", soil_k, crop["k"]),
-                ("Temperature", soil_temp, crop["temp"]),
-            ]
-            for label, val, rng in checks:
-                if in_range(val, rng):
-                    score += 1
-                else:
-                    reasons.append(f"{label} {val} is outside the ideal {rng[0]}–{rng[1]}")
+        results = None
+        fallback = False
 
-            if score >= 4:
-                scored.append((score, crop, reasons))
+        # Backend crop engine (schema.sql -> recommend_crops RPC).
+        # Falls back to the local knowledge base below if the database has not
+        # been provisioned yet (e.g. PGRST205 table-not-found).
+        try:
+            results = recommend_crops(
+                soil_ph, soil_moisture, soil_n, soil_p, soil_k, soil_temp, season
+            )
+            if results.empty:
+                results = None
+        except Exception:
+            results = None
+
+        if results is None:
+            fallback = True
+            scored = []
+            for crop in CROPS:
+                is_perennial = "Perennial" in crop["season"]
+                if season not in crop["season"] and not is_perennial:
+                    continue
+                score = 0
+                reasons = []
+                checks = [
+                    ("pH", soil_ph, crop["ph"]),
+                    ("Moisture", soil_moisture, crop["moisture"]),
+                    ("Nitrogen (N)", soil_n, crop["n"]),
+                    ("Phosphorus (P)", soil_p, crop["p"]),
+                    ("Potassium (K)", soil_k, crop["k"]),
+                    ("Temperature", soil_temp, crop["temp"]),
+                ]
+                for label, val, rng in checks:
+                    if in_range(val, rng):
+                        score += 1
+                    else:
+                        reasons.append(f"{label} {val} is outside the ideal {rng[0]}–{rng[1]}")
+
+                if score >= 4:
+                    scored.append((score, crop, reasons))
+        else:
+            scored = []
+            for _, row in results.iterrows():
+                crop = next(
+                    (c for c in CROPS if c["name"] == row["crop_name"]), None
+                )
+                match_pct = int(row["match_pct"])
+                reasons = []
+                if crop:
+                    checks = [
+                        ("pH", soil_ph, crop["ph"]),
+                        ("Moisture", soil_moisture, crop["moisture"]),
+                        ("Nitrogen (N)", soil_n, crop["n"]),
+                        ("Phosphorus (P)", soil_p, crop["p"]),
+                        ("Potassium (K)", soil_k, crop["k"]),
+                        ("Temperature", soil_temp, crop["temp"]),
+                    ]
+                    for label, val, rng in checks:
+                        if not in_range(val, rng):
+                            reasons.append(f"{label} {val} is outside the ideal {rng[0]}–{rng[1]}")
+                scored.append((int(row["match_score"]), {
+                    "name": row["crop_name"],
+                    "season": [season],
+                    "revenue": row["revenue"],
+                    "market": row["market_outlook"],
+                }, reasons))
 
         if not scored:
             st.warning("😕 No crops match your current soil conditions well. Try adjusting the inputs, or consider soil amendment (liming for low pH, compost for low N/P/K).")
@@ -938,10 +1017,12 @@ elif page == "🌱 Crop Advisor":
             scored.sort(key=lambda x: x[0], reverse=True)
 
             top_score = min(scored[0][0], 5)
+            source = "database agronomy engine" if not fallback else "built-in knowledge base"
             st.markdown(
                 f"<div style='margin: 20px 0 10px 0;'><p style='font-size: 15px; font-weight: 800; color: var(--agri-green); text-transform: uppercase; letter-spacing: 1.2px; margin: 0;'>Top {top_score} candidates for {season} season</p></div>",
                 unsafe_allow_html=True,
             )
+            st.caption(f"Recommendations from the {source}")
 
             for i, (score, crop, reasons) in enumerate(scored[:5], start=1):
 

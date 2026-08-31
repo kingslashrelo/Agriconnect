@@ -15,7 +15,15 @@ AgriConnect now uses **Supabase** as its backend (REST/PostgREST via `supabase-p
 2. Paste the contents of `schema.sql` into a new query and click **Run**.
 3. (Optional, demo data) Paste `seed_data.sql` into a new query and click **Run**.
 
-This creates the tables, the quantity-decrement trigger, the reporting views, and the revenue function.
+This creates the tables, the quantity-decrement trigger, the reporting views, and the revenue function, plus the backend feature set below.
+
+### Backend features (in `schema.sql`)
+
+- **Order lifecycle** — `order_status_history` table + `update_order_status()` RPC enforces valid transitions (`pending → confirmed → delivered`, with `cancelled` / `paid`) and records an audit trail. `order_history_view` gives full buyer/farmer context; `order_status_audit_view` shows the transitions.
+- **Crop engine** — `crops` agronomy table + `recommend_crops()` RPC scores each crop (ph, moisture, N/P/K, temperature, season) and returns ranked matches with estimated revenue and market outlook.
+- **Inventory & sales** — `inventory_view` (current stock), `low_stock_view` (running-low alerts), and `monthly_sales_summary_view` (orders / quantity / value per month).
+- **Revenue** — `get_farmer_revenue()` RPC returns a farmer's total paid revenue.
+- **Auth & RLS** — `farmers.user_id` / `buyers.user_id` link rows to Supabase Auth users; RLS policies restrict access. The app runs on the secret key (bypasses RLS), so these matter only if you switch to anon/publishable keys.
 
 ## 3. Configure environment
 
