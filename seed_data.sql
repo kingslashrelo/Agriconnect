@@ -1,4 +1,5 @@
--- Sample data for demoing the schema — run after schema.sql
+-- Sample data for demoing the schema.
+-- Run AFTER schema.sql in the Supabase SQL Editor (paste + Run).
 
 INSERT INTO farmers (name, village, contact, primary_crop) VALUES
 ('Thomas Varghese', 'Marangattupilly', '9847012345', 'Rubber'),

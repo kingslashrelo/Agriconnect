@@ -1,4 +1,9 @@
--- AgriConnect schema — run this first against your Neon database
+-- AgriConnect schema for Supabase
+-- Run this whole file in the Supabase SQL Editor (Dashboard -> SQL Editor -> New query -> paste -> Run).
+-- This replaces the old Neon schema. It creates the tables, the quantity trigger,
+-- the reporting views, and the revenue function used by the app.
+
+-- ============ TABLES ============
 
 CREATE TABLE farmers (
     farmer_id SERIAL PRIMARY KEY,
@@ -66,6 +71,8 @@ CREATE TABLE price_history (
     avg_market_price DECIMAL(10,2) NOT NULL
 );
 
+-- ============ TRIGGER ============
+
 -- Trigger: decrement listing quantity on order, auto-flag sold out
 CREATE OR REPLACE FUNCTION update_listing_after_order()
 RETURNS TRIGGER AS $$
@@ -87,15 +94,52 @@ AFTER INSERT ON orders
 FOR EACH ROW
 EXECUTE FUNCTION update_listing_after_order();
 
--- View: active listings with farmer details
-CREATE VIEW active_listings_view AS
+-- ============ VIEWS ============
+
+-- Active listings with farmer details
+CREATE OR REPLACE VIEW active_listings_view AS
 SELECT l.listing_id, f.name AS farmer_name, f.village,
-       l.crop_name, l.quantity, l.price_per_unit, l.harvest_date
+       l.crop_name, l.quantity, l.unit, l.price_per_unit, l.harvest_date
 FROM listings l
 JOIN farmers f ON l.farmer_id = f.farmer_id
 WHERE l.status = 'available';
 
--- Function: total paid revenue for a given farmer
+-- Report: most active buyers
+CREATE OR REPLACE VIEW most_active_buyers_view AS
+SELECT b.name, COUNT(o.order_id) AS total_orders, SUM(o.quantity_ordered) AS total_volume
+FROM buyers b
+JOIN orders o ON b.buyer_id = o.buyer_id
+GROUP BY b.name
+ORDER BY total_volume DESC;
+
+-- Report: unsold stock sitting for 15+ days
+CREATE OR REPLACE VIEW unsold_stock_view AS
+SELECT f.name, l.crop_name, l.quantity, l.harvest_date
+FROM listings l
+JOIN farmers f ON l.farmer_id = f.farmer_id
+WHERE l.status = 'available' AND l.harvest_date < CURRENT_DATE - INTERVAL '15 days';
+
+-- Report: average farmer rating
+CREATE OR REPLACE VIEW farmer_avg_rating_view AS
+SELECT f.name, AVG(r.score) AS avg_rating, COUNT(r.rating_id) AS num_ratings
+FROM farmers f
+JOIN listings l ON f.farmer_id = l.farmer_id
+JOIN orders o ON l.listing_id = o.listing_id
+JOIN ratings r ON o.order_id = r.order_id
+GROUP BY f.name
+ORDER BY avg_rating DESC;
+
+-- Report: pending payments
+CREATE OR REPLACE VIEW pending_payments_view AS
+SELECT o.order_id, b.name AS buyer, p.amount, p.status
+FROM orders o
+JOIN buyers b ON o.buyer_id = b.buyer_id
+JOIN payments p ON o.order_id = p.order_id
+WHERE p.status = 'pending';
+
+-- ============ FUNCTION (called via RPC) ============
+
+-- Total paid revenue for a given farmer
 CREATE OR REPLACE FUNCTION get_farmer_revenue(p_farmer_id INT)
 RETURNS TABLE(farmer_name VARCHAR, total_revenue DECIMAL) AS $$
 BEGIN

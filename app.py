@@ -1,31 +1,42 @@
 import os
-import psycopg2
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 import re
+from supabase import create_client
 
 load_dotenv()
 
 
 # ============================================================
-# DATABASE
+# DATABASE (Supabase / PostgREST)
 # ============================================================
 
-def get_connection():
-    return psycopg2.connect(os.environ["NEON_DATABASE_URL"])
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def run_query(query, params=None):
-    with get_connection() as conn:
-        return pd.read_sql(query, conn, params=params)
+def to_df(rows):
+    return pd.DataFrame(rows or [])
 
 
-def run_write(query, params=None):
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-        conn.commit()
+def fetch_all(table, columns="*", order_by=None):
+    query = supabase.from_(table).select(columns)
+    if order_by:
+        query = query.order(order_by)
+    return to_df(query.execute().data)
+
+
+def fetch_eq(table, column, value, columns="*", order_by=None):
+    query = supabase.from_(table).select(columns).eq(column, value)
+    if order_by:
+        query = query.order(order_by)
+    return to_df(query.execute().data)
+
+
+def insert_row(table, payload):
+    return supabase.from_(table).insert(payload).execute()
 
 
 # ============================================================
@@ -800,9 +811,14 @@ elif page == "👨‍🌾 Add Farmer":
                     st.error(f"❌ {error}")
             else:
                 try:
-                    run_write(
-                        "INSERT INTO farmers (name, village, contact, primary_crop) VALUES (%s, %s, %s, %s)",
-                        (name.strip(), village.strip(), contact.strip(), crop.strip()),
+                    insert_row(
+                        "farmers",
+                        {
+                            "name": name.strip(),
+                            "village": village.strip(),
+                            "contact": contact.strip(),
+                            "primary_crop": crop.strip(),
+                        },
                     )
                     st.success(f"✅ Successfully registered farmer **{name}**!")
                     st.balloons()
@@ -884,9 +900,14 @@ elif page == "🛒 Add Buyer":
                     st.error(f"❌ {error}")
             else:
                 try:
-                    run_write(
-                        "INSERT INTO buyers (name, buyer_type, location, contact) VALUES (%s, %s, %s, %s)",
-                        (name.strip(), buyer_type.lower(), location.strip(), contact.strip()),
+                    insert_row(
+                        "buyers",
+                        {
+                            "name": name.strip(),
+                            "buyer_type": buyer_type.strip().lower(),
+                            "location": location.strip(),
+                            "contact": contact.strip(),
+                        },
                     )
                     st.success(f"✅ Successfully registered buyer **{name}** as {buyer_type}!")
                     st.balloons()
@@ -905,8 +926,8 @@ elif page == "🌾 Add Listing":
     st.header("List Your Produce", anchor=False)
     st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Add agricultural products to the marketplace with pricing and availability information.</p>", unsafe_allow_html=True)
 
-    farmers = run_query(
-        "SELECT farmer_id, name FROM farmers ORDER BY name"
+    farmers = fetch_all(
+        "farmers", "farmer_id, name", order_by="name"
     )
 
     if farmers.empty:
@@ -1007,19 +1028,16 @@ elif page == "🌾 Add Listing":
                         st.error(f"❌ {error}")
                 else:
                     try:
-                        run_write(
-                            """INSERT INTO listings
-                               (farmer_id, crop_name, quantity,
-                                unit, price_per_unit, harvest_date)
-                               VALUES (%s, %s, %s, %s, %s, %s)""",
-                            (
-                                farmer_id,
-                                crop_name.strip(),
-                                quantity,
-                                unit,
-                                price,
-                                harvest_date,
-                            ),
+                        insert_row(
+                            "listings",
+                            {
+                                "farmer_id": farmer_id,
+                                "crop_name": crop_name.strip(),
+                                "quantity": quantity,
+                                "unit": unit,
+                                "price_per_unit": price,
+                                "harvest_date": str(harvest_date),
+                            },
                         )
                         st.success(f"✅ Successfully listed **{crop_name}** ({quantity} {unit}) for ₹{price}!")
                         st.balloons()
@@ -1037,16 +1055,14 @@ elif page == "📦 Place Order":
     st.header("Place an Order", anchor=False)
     st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Create a new order for available produce.</p>", unsafe_allow_html=True)
 
-    buyers = run_query(
-        "SELECT buyer_id, name FROM buyers ORDER BY name"
+    buyers = fetch_all(
+        "buyers", "buyer_id, name", order_by="name"
     )
 
-    listings = run_query(
-        """SELECT l.listing_id, f.name AS farmer_name, l.crop_name,
-                  l.quantity, l.price_per_unit, l.unit
-           FROM listings l JOIN farmers f
-           ON l.farmer_id = f.farmer_id
-           WHERE l.status = 'available'"""
+    listings = fetch_all(
+        "active_listings_view",
+        "listing_id, farmer_name, crop_name, quantity, price_per_unit, unit",
+        order_by="farmer_name",
     )
 
     if buyers.empty or listings.empty:
@@ -1162,13 +1178,13 @@ elif page == "📦 Place Order":
                         st.error(f"❌ {error}")
                 else:
                     try:
-                        run_write(
-                            "INSERT INTO orders (buyer_id, listing_id, quantity_ordered) VALUES (%s, %s, %s)",
-                            (
-                                buyer_id,
-                                listing_id,
-                                qty,
-                            ),
+                        insert_row(
+                            "orders",
+                            {
+                                "buyer_id": buyer_id,
+                                "listing_id": listing_id,
+                                "quantity_ordered": qty,
+                            },
                         )
                         st.success(f"✅ Order placed successfully! ₹{total_price:,.2f} order created.")
                         st.balloons()
@@ -1186,8 +1202,8 @@ elif page == "📋 Active Listings":
     st.header("Active Listings", anchor=False)
     st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Browse all currently available produce listings.</p>", unsafe_allow_html=True)
 
-    listings = run_query(
-        "SELECT * FROM active_listings_view ORDER BY harvest_date"
+    listings = fetch_all(
+        "active_listings_view", "*", order_by="harvest_date"
     )
 
     if listings.empty:
@@ -1254,8 +1270,8 @@ elif page == "📊 Reports":
 
     if report == "📈 Revenue per Farmer":
 
-        farmers = run_query(
-            "SELECT farmer_id, name FROM farmers ORDER BY name"
+        farmers = fetch_all(
+            "farmers", "farmer_id, name", order_by="name"
         )
 
         if farmers.empty:
@@ -1274,34 +1290,18 @@ elif page == "📊 Reports":
                 ].iloc[0]
             )
 
-            revenue_data = run_query(
-                "SELECT * FROM get_farmer_revenue(%s)",
-                (farmer_id,),
-            )
+            revenue = supabase.rpc(
+                "get_farmer_revenue", {"p_farmer_id": farmer_id}
+            ).execute().data
 
-            if revenue_data.empty:
-                st.info(f"✅ {farmer} has no revenue yet.")
-            else:
-                total_revenue = revenue_data.get("total_revenue", pd.Series([0])).sum()
-                col_rev1, col_rev2 = st.columns(2)
-                with col_rev1:
-                    st.metric("Total Revenue (₹)", f"₹ {total_revenue:,.2f}")
-                with col_rev2:
-                    st.metric("Transactions", len(revenue_data))
-                
-                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-                
-                st.dataframe(
-                    revenue_data,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "amount": st.column_config.NumberColumn(
-                            label="Amount (₹)",
-                            format="₹%,.2f"
-                        ),
-                    } if "amount" in revenue_data.columns else {}
-                )
+            st.dataframe(
+                run_query(
+                    "SELECT * FROM get_farmer_revenue(%s)",
+                    (farmer_id,),
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
     # --------------------------------------------------------
@@ -1310,44 +1310,18 @@ elif page == "📊 Reports":
 
     elif report == "🏆 Most Active Buyers":
 
-        buyers_data = run_query(
-            """SELECT b.name, COUNT(o.order_id) AS total_orders,
-                      SUM(o.quantity_ordered) AS total_volume
-               FROM buyers b JOIN orders o
-               ON b.buyer_id = o.buyer_id
-               GROUP BY b.name
-               ORDER BY total_volume DESC"""
+        st.dataframe(
+            run_query(
+                """SELECT b.name, COUNT(o.order_id) AS total_orders,
+                          SUM(o.quantity_ordered) AS total_volume
+                   FROM buyers b JOIN orders o
+                   ON b.buyer_id = o.buyer_id
+                   GROUP BY b.name
+                   ORDER BY total_volume DESC"""
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
-
-        if buyers_data.empty:
-            st.info("📭 No buyer activity yet.")
-        else:
-            col_buy1, col_buy2, col_buy3 = st.columns(3)
-            with col_buy1:
-                st.metric("Top Buyer", buyers_data.iloc[0]["name"] if len(buyers_data) > 0 else "—")
-            with col_buy2:
-                st.metric("Total Active Buyers", len(buyers_data))
-            with col_buy3:
-                avg_orders = buyers_data["total_orders"].mean()
-                st.metric("Avg Orders/Buyer", f"{avg_orders:.1f}")
-            
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-            
-            st.dataframe(
-                buyers_data,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "total_orders": st.column_config.NumberColumn(
-                        label="Orders",
-                        format="%d"
-                    ),
-                    "total_volume": st.column_config.NumberColumn(
-                        label="Volume",
-                        format="%.1f"
-                    ),
-                } if "total_orders" in buyers_data.columns else {}
-            )
 
 
     # --------------------------------------------------------
@@ -1363,43 +1337,18 @@ elif page == "📊 Reports":
         )
         st.caption("Enter the crop name to view price history")
 
-        price_data = run_query(
-            """SELECT crop_name, record_date,
-                      avg_market_price
-               FROM price_history
-               WHERE crop_name = %s
-               ORDER BY record_date""",
-            (crop,),
+        st.dataframe(
+            run_query(
+                """SELECT crop_name, record_date,
+                          avg_market_price
+                   FROM price_history
+                   WHERE crop_name = %s
+                   ORDER BY record_date""",
+                (crop,),
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
-
-        if price_data.empty:
-            st.warning(f"⚠️ No price history found for '{crop}'.")
-        else:
-            current_price = price_data.iloc[-1]["avg_market_price"] if len(price_data) > 0 else 0
-            min_price = price_data["avg_market_price"].min()
-            max_price = price_data["avg_market_price"].max()
-            
-            col_price1, col_price2, col_price3 = st.columns(3)
-            with col_price1:
-                st.metric("Current Price (₹)", f"₹ {current_price:,.2f}")
-            with col_price2:
-                st.metric("Min Price (₹)", f"₹ {min_price:,.2f}")
-            with col_price3:
-                st.metric("Max Price (₹)", f"₹ {max_price:,.2f}")
-            
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-            
-            st.dataframe(
-                price_data,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "avg_market_price": st.column_config.NumberColumn(
-                        label="Price (₹)",
-                        format="₹%,.2f"
-                    ),
-                } if "avg_market_price" in price_data.columns else {}
-            )
 
 
     # --------------------------------------------------------
@@ -1408,40 +1357,19 @@ elif page == "📊 Reports":
 
     elif report == "📦 Unsold Stock (15+ days)":
 
-        unsold_data = run_query(
-            """SELECT f.name, l.crop_name,
-                      l.quantity, l.harvest_date
-               FROM listings l JOIN farmers f
-               ON l.farmer_id = f.farmer_id
-               WHERE l.status = 'available'
-               AND l.harvest_date <
-               CURRENT_DATE - INTERVAL '15 days'"""
+        st.dataframe(
+            run_query(
+                """SELECT f.name, l.crop_name,
+                          l.quantity, l.harvest_date
+                   FROM listings l JOIN farmers f
+                   ON l.farmer_id = f.farmer_id
+                   WHERE l.status = 'available'
+                   AND l.harvest_date <
+                   CURRENT_DATE - INTERVAL '15 days'"""
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
-
-        if unsold_data.empty:
-            st.success("✅ No old unsold stock found!")
-        else:
-            col_unsold1, col_unsold2 = st.columns(2)
-            with col_unsold1:
-                st.metric("Unsold Items", len(unsold_data))
-            with col_unsold2:
-                total_unsold_qty = unsold_data.get("quantity", pd.Series()).sum()
-                st.metric("Total Quantity", f"{total_unsold_qty:,.1f}")
-            
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-            st.warning("⚠️ These items have been unsold for more than 15 days.", icon="⚠️")
-            
-            st.dataframe(
-                unsold_data,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "quantity": st.column_config.NumberColumn(
-                        label="Quantity",
-                        format="%.1f"
-                    ),
-                } if "quantity" in unsold_data.columns else {}
-            )
 
 
     # --------------------------------------------------------
@@ -1450,50 +1378,24 @@ elif page == "📊 Reports":
 
     elif report == "⭐ Average Farmer Rating":
 
-        rating_data = run_query(
-            """SELECT f.name,
-                      AVG(r.score) AS avg_rating,
-                      COUNT(r.rating_id) AS num_ratings
-               FROM farmers f
-               JOIN listings l
-               ON f.farmer_id = l.farmer_id
-               JOIN orders o
-               ON l.listing_id = o.listing_id
-               JOIN ratings r
-               ON o.order_id = r.order_id
-               GROUP BY f.name
-               ORDER BY avg_rating DESC"""
+        st.dataframe(
+            run_query(
+                """SELECT f.name,
+                          AVG(r.score) AS avg_rating,
+                          COUNT(r.rating_id) AS num_ratings
+                   FROM farmers f
+                   JOIN listings l
+                   ON f.farmer_id = l.farmer_id
+                   JOIN orders o
+                   ON l.listing_id = o.listing_id
+                   JOIN ratings r
+                   ON o.order_id = r.order_id
+                   GROUP BY f.name
+                   ORDER BY avg_rating DESC"""
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
-
-        if rating_data.empty:
-            st.info("📭 No ratings available yet.")
-        else:
-            top_rating = rating_data.iloc[0]["avg_rating"] if len(rating_data) > 0 else 0
-            avg_rating_overall = rating_data["avg_rating"].mean()
-            
-            col_rating1, col_rating2 = st.columns(2)
-            with col_rating1:
-                st.metric("Highest Rating", f"⭐ {top_rating:.2f}")
-            with col_rating2:
-                st.metric("Avg Rating Overall", f"⭐ {avg_rating_overall:.2f}")
-            
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-            
-            st.dataframe(
-                rating_data,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "avg_rating": st.column_config.NumberColumn(
-                        label="Rating",
-                        format="⭐ %.2f"
-                    ),
-                    "num_ratings": st.column_config.NumberColumn(
-                        label="Ratings Count",
-                        format="%d"
-                    ),
-                } if "avg_rating" in rating_data.columns else {}
-            )
 
 
     # --------------------------------------------------------
@@ -1502,42 +1404,20 @@ elif page == "📊 Reports":
 
     elif report == "💰 Pending Payments":
 
-        payment_data = run_query(
-            """SELECT o.order_id,
-                      b.name AS buyer,
-                      p.amount,
-                      p.status
-               FROM orders o
-               JOIN buyers b
-               ON o.buyer_id = b.buyer_id
-               JOIN payments p
-               ON o.order_id = p.order_id
-               WHERE p.status = 'pending'"""
-        )
+        st.dataframe(
+            run_query(
+                """SELECT o.order_id,
+                          b.name AS buyer,
+                          p.amount,
+                          p.status
+                   FROM orders o
+                   JOIN buyers b
+                   ON o.buyer_id = b.buyer_id
 
-        if payment_data.empty:
-            st.success("✅ No pending payments!")
-        else:
-            pending_count = len(payment_data)
-            total_pending = payment_data.get("amount", pd.Series()).sum()
-            
-            col_pay1, col_pay2 = st.columns(2)
-            with col_pay1:
-                st.metric("Pending Payments", pending_count)
-            with col_pay2:
-                st.metric("Total Amount (₹)", f"₹ {total_pending:,.2f}")
-            
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-            st.warning(f"⚠️ {pending_count} payment(s) pending collection.", icon="⚠️")
-            
-            st.dataframe(
-                payment_data,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "amount": st.column_config.NumberColumn(
-                        label="Amount (₹)",
-                        format="₹%,.2f"
-                    ),
-                } if "amount" in payment_data.columns else {}
-            )
+                   JOIN payments p
+                   ON o.order_id = p.order_id
+                   WHERE p.status = 'pending'"""
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
