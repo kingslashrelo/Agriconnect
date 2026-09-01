@@ -360,3 +360,43 @@ CREATE POLICY "orders_visible" ON orders
             WHERE l.listing_id = orders.listing_id
         )
     );
+
+
+-- ============================================================
+-- REPORT RPC FUNCTIONS (used by the UI's Reports pages)
+-- ============================================================
+-- The UI calls these via supabase.rpc("get_most_active_buyers") and
+-- supabase.rpc("get_farmer_ratings"). They wrap the equivalent views
+-- so the front-end gets the same data through RPC calls.
+
+-- Report: most active buyers (by total order volume)
+CREATE OR REPLACE FUNCTION get_most_active_buyers()
+RETURNS TABLE(name VARCHAR, total_orders BIGINT, total_volume NUMERIC) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT b.name,
+           COUNT(o.order_id)::BIGINT,
+           COALESCE(SUM(o.quantity_ordered), 0)
+    FROM buyers b
+    JOIN orders o ON b.buyer_id = o.buyer_id
+    GROUP BY b.name
+    ORDER BY total_volume DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Report: average farmer rating (from buyer ratings)
+CREATE OR REPLACE FUNCTION get_farmer_ratings()
+RETURNS TABLE(name VARCHAR, avg_rating NUMERIC, num_ratings BIGINT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT f.name,
+           ROUND(AVG(r.score), 2),
+           COUNT(r.rating_id)::BIGINT
+    FROM farmers f
+    JOIN listings l ON f.farmer_id = l.farmer_id
+    JOIN orders o ON l.listing_id = o.listing_id
+    JOIN ratings r ON o.order_id = r.order_id
+    GROUP BY f.name
+    ORDER BY avg_rating DESC;
+END;
+$$ LANGUAGE plpgsql;
