@@ -51,7 +51,10 @@ SUPABASE_KEY=your-secret-key
 ## Database features (`schema.sql`)
 
 ### Tables
-- **farmers / buyers** — registered users (each has an optional `user_id` linking to Supabase Auth).
+- **farmers / buyers** — registered users, each with:
+  - `user_id` (optional) linking to Supabase Auth.
+  - **`aadhaar_hash`** — a one-way SHA-256 hash of the user's 12-digit Aadhaar. The raw Aadhaar
+    number is **never stored or returned**; it is only used for login (see RPCs below).
 - **listings** — produce for sale (crop, quantity, unit, price).
 - **orders** — purchase orders with a status lifecycle (`pending → confirmed → delivered`, plus `cancelled` / `paid`).
 - **payments, ratings, schemes, price_history** — payment tracking, buyer feedback, subsidy schemes, and market prices.
@@ -65,6 +68,11 @@ SUPABASE_KEY=your-secret-key
 - **`recommend_crops`** — scores each crop against soil parameters (pH, moisture, N/P/K, temperature, season) and returns ranked matches with estimated revenue and market outlook.
 - **`update_order_status`** — advances an order to a new status, enforcing valid transitions and writing to the audit trail.
 - **`get_farmer_revenue`** — returns a farmer's total paid revenue.
+- **`get_most_active_buyers`** — report: buyers with highest total order volume.
+- **`get_farmer_ratings`** — report: average rating per farmer.
+- **Aadhaar login (secure)** — `set_farmer_aadhaar`, `set_buyer_aadhaar` (register/hash on
+  signup), and `aadhaar_farmer_login` / `aadhaar_buyer_login` (verify and return `id` + `name`
+  only). The raw Aadhaar is never exposed.
 
 ### Reporting views
 - `active_listings_view` — available produce with farmer details.
@@ -78,3 +86,10 @@ SUPABASE_KEY=your-secret-key
 ### Auth & Row Level Security
 - `farmers.user_id` / `buyers.user_id` link rows to Supabase Auth users.
 - RLS policies restrict per-user access. These only apply when the anon/publishable key is used; the secret key bypasses them.
+
+## UI requirements (for the Streamlit app)
+
+The app must use a **farm/green glassmorphism** theme, and must surface every DB feature above.
+A dedicated guide for the hosting/UI agent is in **`AGENTS.md`** (it is auto-read by coding
+agents on every repo access). See it for the full feature checklist, the Aadhaar login flow, and
+the known UI bugs to fix (theme-toggle glitch and left-panel nav layout).
