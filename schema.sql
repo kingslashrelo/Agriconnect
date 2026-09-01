@@ -322,6 +322,79 @@ ORDER BY month DESC;
 ALTER TABLE farmers ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);
 ALTER TABLE buyers  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);
 
+-- Aadhaar-based login (secure, no raw number stored)
+-- ------------------------------------------------------------------
+-- The raw Aadhaar number is NEVER stored or returned. We keep only a
+-- one-way hash, so the DB stores "safe" data and no one (including the
+-- app) can read the actual number back. Login = hash the user's input
+-- and compare it to the stored hash.
+ALTER TABLE farmers ADD COLUMN IF NOT EXISTS aadhaar_hash TEXT UNIQUE;
+ALTER TABLE buyers  ADD COLUMN IF NOT EXISTS aadhaar_hash TEXT UNIQUE;
+COMMENT ON COLUMN farmers.aadhaar_hash IS
+  'SHA-256 hash of the farmer''s Aadhaar (salted). Never store or return the raw number.';
+COMMENT ON COLUMN buyers.aadhaar_hash IS
+  'SHA-256 hash of the buyer''s Aadhaar (salted). Never store or return the raw number.';
+
+-- Set/register a farmer's Aadhaar hash on signup.
+-- Callable via RPC: supabase.rpc("set_farmer_aadhaar", {p_farmer_id, p_aadhaar})
+CREATE OR REPLACE FUNCTION set_farmer_aadhaar(p_farmer_id INT, p_aadhaar TEXT)
+RETURNS TEXT AS $$
+BEGIN
+    IF coalesce(p_aadhaar,'') !~ '^[0-9]{12}$' THEN
+        RAISE EXCEPTION 'Invalid Aadhaar format (must be 12 digits)';
+    END IF;
+    UPDATE farmers SET aadhaar_hash = encode(sha256(digest(p_aadhaar || 'agriconnect', 'sha256')),'hex')
+    WHERE farmer_id = p_farmer_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Farmer % not found', p_farmer_id;
+    END IF;
+    RETURN 'ok';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Verify a farmer's Aadhaar for login. Returns the farmer_id + name on
+-- success, or NULL/empty when the number does not match. The hash value
+-- itself is never returned, so it cannot leak.
+CREATE OR REPLACE FUNCTION aadhaar_farmer_login(p_aadhaar TEXT)
+RETURNS TABLE(farmer_id INT, name VARCHAR) AS $$
+DECLARE
+    v_hash TEXT := encode(sha256(digest(p_aadhaar || 'agriconnect', 'sha256')),'hex');
+BEGIN
+    RETURN QUERY
+    SELECT f.farmer_id, f.name
+    FROM farmers f
+    WHERE f.aadhaar_hash = v_hash;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Buyer equivalent (same secure pattern).
+CREATE OR REPLACE FUNCTION set_buyer_aadhaar(p_buyer_id INT, p_aadhaar TEXT)
+RETURNS TEXT AS $$
+BEGIN
+    IF coalesce(p_aadhaar,'') !~ '^[0-9]{12}$' THEN
+        RAISE EXCEPTION 'Invalid Aadhaar format (must be 12 digits)';
+    END IF;
+    UPDATE buyers SET aadhaar_hash = encode(sha256(digest(p_aadhaar || 'agriconnect', 'sha256')),'hex')
+    WHERE buyer_id = p_buyer_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Buyer % not found', p_buyer_id;
+    END IF;
+    RETURN 'ok';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION aadhaar_buyer_login(p_aadhaar TEXT)
+RETURNS TABLE(buyer_id INT, name VARCHAR) AS $$
+DECLARE
+    v_hash TEXT := encode(sha256(digest(p_aadhaar || 'agriconnect', 'sha256')),'hex');
+BEGIN
+    RETURN QUERY
+    SELECT b.buyer_id, b.name
+    FROM buyers b
+    WHERE b.aadhaar_hash = v_hash;
+END;
+$$ LANGUAGE plpgsql;
+
 ALTER TABLE farmers   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE buyers    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE listings  ENABLE ROW LEVEL SECURITY;
@@ -360,3 +433,43 @@ CREATE POLICY "orders_visible" ON orders
             WHERE l.listing_id = orders.listing_id
         )
     );
+
+
+-- ============================================================
+-- REPORT RPC FUNCTIONS (used by the UI's Reports pages)
+-- ============================================================
+-- The UI calls these via supabase.rpc("get_most_active_buyers") and
+-- supabase.rpc("get_farmer_ratings"). They wrap the equivalent views
+-- so the front-end gets the same data through RPC calls.
+
+-- Report: most active buyers (by total order volume)
+CREATE OR REPLACE FUNCTION get_most_active_buyers()
+RETURNS TABLE(name VARCHAR, total_orders BIGINT, total_volume NUMERIC) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT b.name,
+           COUNT(o.order_id)::BIGINT,
+           COALESCE(SUM(o.quantity_ordered), 0)
+    FROM buyers b
+    JOIN orders o ON b.buyer_id = o.buyer_id
+    GROUP BY b.name
+    ORDER BY total_volume DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Report: average farmer rating (from buyer ratings)
+CREATE OR REPLACE FUNCTION get_farmer_ratings()
+RETURNS TABLE(name VARCHAR, avg_rating NUMERIC, num_ratings BIGINT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT f.name,
+           ROUND(AVG(r.score), 2),
+           COUNT(r.rating_id)::BIGINT
+    FROM farmers f
+    JOIN listings l ON f.farmer_id = l.farmer_id
+    JOIN orders o ON l.listing_id = o.listing_id
+    JOIN ratings r ON o.order_id = r.order_id
+    GROUP BY f.name
+    ORDER BY avg_rating DESC;
+END;
+$$ LANGUAGE plpgsql;
