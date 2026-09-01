@@ -6,8 +6,6 @@ import re
 from supabase import create_client
 
 load_dotenv()
-
-
 # ============================================================
 # DATABASE (Supabase / PostgREST)
 # ============================================================
