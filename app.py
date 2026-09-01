@@ -85,9 +85,18 @@ st.markdown(
        AGRICONNECT — PREMIUM LIGHT UI WITH ENHANCED STYLING
        ========================================================= */
 
+    /* Distinct display + body pairing so the app reads as its own product
+       instead of the generic Streamlit default typeface. This @import is
+       what lets the custom HTML blocks below (.hero-title, .feature-card,
+       etc.) pick up the fonts — the same two fonts are also set natively
+       in .streamlit/config.toml (theme.font / theme.headingFont) so every
+       built-in widget matches too. */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+
     * {
         margin: 0;
         padding: 0;
+        box-sizing: border-box;
     }
 
     :root {
@@ -105,12 +114,24 @@ st.markdown(
         --agri-warning: #F59E0B;
         --agri-success: #10B981;
         --agri-info: #3B82F6;
+
+        --agri-font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        --agri-font-heading: 'Manrope', 'Inter', -apple-system, sans-serif;
+
+        --agri-shadow-sm: 0 2px 8px rgba(31, 77, 43, 0.06);
+        --agri-shadow-md: 0 8px 24px rgba(31, 77, 43, 0.08);
+        --agri-shadow-lg: 0 16px 40px rgba(31, 77, 43, 0.14);
     }
 
     /* ========= BASE ========= */
+    html {
+        scroll-behavior: smooth;
+    }
+
     .stApp {
         background: var(--agri-page);
         color: var(--agri-text);
+        font-family: var(--agri-font-body) !important;
     }
 
     [data-testid="stAppViewContainer"],
@@ -126,6 +147,11 @@ st.markdown(
         padding-right: 1.5rem;
     }
 
+    ::selection {
+        background: var(--agri-green-light);
+        color: var(--agri-green-dark);
+    }
+
     /* ========= SIDEBAR ========= */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, #F1F7F2 0%, #FFFFFF 100%);
@@ -139,6 +165,7 @@ st.markdown(
     section[data-testid="stSidebar"] h1,
     section[data-testid="stSidebar"] h2,
     section[data-testid="stSidebar"] h3 {
+        font-family: var(--agri-font-heading) !important;
         color: var(--agri-green-dark) !important;
         font-weight: 700 !important;
     }
@@ -183,6 +210,7 @@ st.markdown(
 
     /* ========= TYPOGRAPHY ========= */
     h1 {
+        font-family: var(--agri-font-heading) !important;
         color: var(--agri-text) !important;
         font-weight: 800 !important;
         letter-spacing: -0.03em !important;
@@ -191,6 +219,7 @@ st.markdown(
     }
 
     h2 {
+        font-family: var(--agri-font-heading) !important;
         color: var(--agri-text) !important;
         font-weight: 750 !important;
         letter-spacing: -0.02em !important;
@@ -198,6 +227,7 @@ st.markdown(
     }
 
     h3 {
+        font-family: var(--agri-font-heading) !important;
         color: var(--agri-text) !important;
         font-weight: 700 !important;
         letter-spacing: -0.01em !important;
@@ -222,7 +252,9 @@ st.markdown(
         border: 2px solid var(--agri-green) !important;
         background: var(--agri-green) !important;
         color: #FFFFFF !important;
+        font-family: var(--agri-font-body) !important;
         font-weight: 700 !important;
+        letter-spacing: 0.01em !important;
         padding: 0.75rem 1.25rem !important;
         font-size: 1rem !important;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
@@ -249,7 +281,7 @@ st.markdown(
         border-radius: 18px !important;
         padding: 2rem !important;
         background: var(--agri-surface) !important;
-        box-shadow: 0 10px 30px rgba(31, 77, 43, 0.08) !important;
+        box-shadow: var(--agri-shadow-lg) !important;
     }
 
     div[data-testid="stForm"] > button {
@@ -266,6 +298,7 @@ st.markdown(
         padding: 0.75rem 1rem !important;
         background: #FFFFFF !important;
         color: var(--agri-text) !important;
+        font-family: var(--agri-font-body) !important;
         font-size: 1rem !important;
         font-weight: 500 !important;
         transition: all 0.3s ease !important;
@@ -309,7 +342,7 @@ st.markdown(
         border-radius: 18px;
         border: 2px solid var(--agri-border);
         background: var(--agri-surface);
-        box-shadow: 0 8px 24px rgba(31, 77, 43, 0.06);
+        box-shadow: var(--agri-shadow-md);
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
         overflow: hidden;
@@ -327,7 +360,7 @@ st.markdown(
 
     .feature-card:hover {
         transform: translateY(-6px);
-        box-shadow: 0 16px 40px rgba(31, 77, 43, 0.12);
+        box-shadow: var(--agri-shadow-lg);
         border-color: var(--agri-green);
     }
 
@@ -337,7 +370,7 @@ st.markdown(
         border: 2px solid var(--agri-border);
         padding: 1.25rem;
         border-radius: 14px;
-        box-shadow: 0 4px 12px rgba(31, 77, 43, 0.05);
+        box-shadow: var(--agri-shadow-sm);
     }
 
     div[data-testid="stMetric"] > div {
@@ -350,15 +383,15 @@ st.markdown(
         border-radius: 14px !important;
         overflow: hidden;
         background: var(--agri-surface) !important;
-        box-shadow: 0 4px 12px rgba(31, 77, 43, 0.05) !important;
+        box-shadow: var(--agri-shadow-sm) !important;
     }
 
     [data-testid="stDataFrame"] tbody tr {
-        border-bottom: 1px solid #E0E7FF !important;
+        border-bottom: 1px solid var(--agri-border) !important;
     }
 
     [data-testid="stDataFrame"] tbody tr:hover {
-        background-color: #F0F9FF !important;
+        background-color: var(--agri-green-soft) !important;
     }
 
     [data-testid="stDataFrame"] thead tr {
@@ -378,34 +411,24 @@ st.markdown(
     }
 
     /* ========= ALERTS ========= */
+    /* Shape only. Per-type colour (green success / blue info / amber
+       warning / red error) now comes from .streamlit/config.toml's
+       greenColor / blueColor / orangeColor / redColor, which Streamlit
+       applies to st.success/info/warning/error natively. (The previous
+       rules tried to hand-recolour each alert here, but the "success"
+       selector targeted an auto-generated class name that doesn't
+       reliably exist, so the unqualified "warning" rule after it ended up
+       winning for every alert type. Driving colour from the theme avoids
+       that whole class of bug.) */
     div[data-testid="stAlert"] {
         border-radius: 14px !important;
-        border: 2px solid !important;
         padding: 1rem 1.25rem !important;
         font-weight: 600 !important;
+        box-shadow: var(--agri-shadow-sm);
     }
 
     div[data-testid="stAlert"] [data-testid="stAlertTitle"] {
         font-weight: 700 !important;
-    }
-
-    /* Success */
-    .st-emotion-cache-1y4p8pa > div > div[role="alert"] {
-        background-color: rgba(16, 185, 129, 0.08) !important;
-        border-color: var(--agri-success) !important;
-        color: var(--agri-success) !important;
-    }
-
-    /* Warning */
-    div[data-testid="stAlert"] {
-        background-color: rgba(245, 158, 11, 0.08) !important;
-        border-color: var(--agri-warning) !important;
-    }
-
-    /* Info */
-    div[data-testid="stAlert"][kind="info"] {
-        background-color: rgba(59, 130, 246, 0.08) !important;
-        border-color: var(--agri-info) !important;
     }
 
     /* ========= HERO ========= */
@@ -415,10 +438,11 @@ st.markdown(
         background: linear-gradient(135deg, var(--agri-green-light) 0%, #F9FCF9 70%);
         border: 2px solid var(--agri-border);
         margin-bottom: 36px;
-        box-shadow: 0 10px 30px rgba(31, 77, 43, 0.08);
+        box-shadow: var(--agri-shadow-md);
     }
 
     .hero-title {
+        font-family: var(--agri-font-heading);
         font-size: clamp(36px, 5vw, 52px);
         font-weight: 800;
         color: var(--agri-green-dark);
@@ -437,11 +461,12 @@ st.markdown(
 
     /* ========= SECTION LABELS ========= */
     .section-label {
+        font-family: var(--agri-font-body);
         color: var(--agri-green);
-        font-size: 13px;
-        font-weight: 800;
+        font-size: 12px;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 1.5px;
+        letter-spacing: 1px;
         margin-bottom: 8px;
         display: inline-block;
     }
@@ -455,6 +480,7 @@ st.markdown(
     }
 
     .feature-title {
+        font-family: var(--agri-font-heading);
         font-size: 20px;
         font-weight: 700;
         color: var(--agri-green-dark);
@@ -479,6 +505,32 @@ st.markdown(
         border: 0;
         border-top: 2px solid var(--agri-border);
         margin: 1.5rem 0 !important;
+    }
+
+    /* ========= ACCESSIBILITY ========= */
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    [role="radio"]:focus-visible,
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:focus-within {
+        outline: 2px solid var(--agri-green) !important;
+        outline-offset: 2px !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.001ms !important;
+            transition-duration: 0.001ms !important;
+        }
+
+        .feature-card:hover,
+        .stButton > button:hover,
+        .stFormSubmitButton > button:hover {
+            transform: none !important;
+        }
     }
 
     /* ========= RESPONSIVE ========= */
