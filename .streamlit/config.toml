@@ -1,0 +1,59 @@
+# ============================================================
+# AgriConnect - Streamlit theme + client configuration
+# ============================================================
+# A single, consistent farm/green LIGHT theme on a pure white page.
+#
+# Only [theme] is defined (no [theme.light] / [theme.dark] variants), so
+# Streamlit locks the app to this one theme. That removes the glitchy
+# Auto/Light/Dark toggle and stops the top header from flipping to a dark
+# "banner" over the light UI.
+
+[theme]
+base = "light"
+
+primaryColor = "#059669"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#000000"
+linkColor = "#059669"
+codeBackgroundColor = "#F0FDF4"
+codeTextColor = "#065F46"
+borderColor = "#E6EBE8"
+
+# Dataframe / table
+dataframeBorderColor = "#E6EBE8"
+dataframeHeaderBackgroundColor = "#F0FDF4"
+dataframeHeaderTextColor = "#065F46"
+
+# Semantic status colors
+greenColor = "#059669"
+greenBackgroundColor = "#ECFDF5"
+greenTextColor = "#065F46"
+blueColor = "#2563EB"
+orangeColor = "#D97706"
+redColor = "#DC2626"
+
+# Typography
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Space Grotesk:https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+baseFontSize = 16
+headingFontWeights = [700, 700, 600, 600, 600, 600]
+
+# Shape
+baseRadius = "large"
+buttonRadius = "12px"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# Charts
+chartCategoricalColors = ["#059669", "#2563EB", "#D97706", "#7C3AED", "#DC2626", "#0D9488", "#64748B"]
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0FDF4"
+textColor = "#0F172A"
+borderColor = "#E6EBE8"
+primaryColor = "#059669"
+
+[client]
+toolbarMode = "minimal"

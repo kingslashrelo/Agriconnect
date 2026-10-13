@@ -1,18 +1,34 @@
 import os
+import re
+import html
+
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-import re
 from supabase import create_client
 
 load_dotenv()
-# ============================================================
-# DATABASE (Supabase / PostgREST)
-# ============================================================
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+
+_DB_ERROR = {"message": None}
+
+
+def _record_db_error(exc):
+    if _DB_ERROR["message"] is None:
+        _DB_ERROR["message"] = f"{type(exc).__name__}: {exc}"
+
+
+def _not_configured():
+    if supabase is None:
+        _DB_ERROR["message"] = (
+            "Supabase client is not configured — missing SUPABASE_URL / SUPABASE_KEY."
+        )
+        return True
+    return False
 
 
 def to_df(rows):
@@ -20,50 +36,177 @@ def to_df(rows):
 
 
 def fetch_all(table, columns="*", order_by=None):
-    query = supabase.from_(table).select(columns)
-    if order_by:
-        query = query.order(order_by)
-    return to_df(query.execute().data)
+    if _not_configured():
+        return pd.DataFrame()
+    try:
+        query = supabase.from_(table).select(columns)
+        if order_by:
+            query = query.order(order_by)
+        return to_df(query.execute().data)
+    except Exception as e:
+        _record_db_error(e)
+        return pd.DataFrame()
 
 
 def fetch_eq(table, column, value, columns="*", order_by=None):
-    query = supabase.from_(table).select(columns).eq(column, value)
-    if order_by:
-        query = query.order(order_by)
-    return to_df(query.execute().data)
+    if _not_configured():
+        return pd.DataFrame()
+    try:
+        query = supabase.from_(table).select(columns).eq(column, value)
+        if order_by:
+            query = query.order(order_by)
+        return to_df(query.execute().data)
+    except Exception as e:
+        _record_db_error(e)
+        return pd.DataFrame()
 
 
 def insert_row(table, payload):
+    if supabase is None:
+        raise RuntimeError("Supabase client is not configured.")
     return supabase.from_(table).insert(payload).execute()
 
 
-def run_query(query, params=None):
-    """Execute a PostgreSQL query via Supabase RPC (placeholder)"""
-    # This is a placeholder - in production, you'd use RPC functions
-    # For now, return empty dataframe
-    return pd.DataFrame()
-
-
-# ============================================================
-# VALIDATION UTILITIES
-# ============================================================
-
 def validate_phone(phone):
-    """Validate phone number format"""
-    return bool(re.match(r'^[6-9]\d{9}$', str(phone).strip()))
+    return bool(re.match(r"^[6-9]\d{9}$", str(phone).strip()))
+
 
 def validate_name(name):
-    """Validate name (letters and spaces only)"""
-    return bool(re.match(r'^[a-zA-Z\s]{2,}$', str(name).strip()))
+    return bool(re.match(r"^[a-zA-Z\s]{2,}$", str(name).strip()))
+
 
 def validate_not_empty(value):
-    """Validate field is not empty"""
+    if value is None:
+        return False
     return bool(str(value).strip())
 
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
+ADD_NEW_CROP = "➕ Add a new crop…"
+
+MAX_FARMER_CROPS = 8
+
+
+def title_case(value):
+    if not value:
+        return value
+    words = str(value).strip().split()
+    return " ".join(w[:1].upper() + w[1:] for w in words)
+
+
+CROP_CATALOG = [
+    "Wheat", "Paddy (Rice)", "Maize (Corn)", "Sugarcane", "Cotton", "Groundnut",
+    "Soybean", "Mustard", "Sunflower", "Sesame", "Safflower", "Linseed (Flax)",
+    "Chickpea (Chana)", "Pigeon Pea (Arhar)", "Green Gram (Moong)", "Black Gram (Urad)",
+    "Lentil (Masoor)", "Pea", "Peanut", "Finger Millet (Ragi)", "Pearl Millet (Bajra)",
+    "Sorghum (Jowar)", "Barley", "Oats", "Quinoa", "Buckwheat",
+    "Potato", "Sweet Potato", "Onion", "Tomato", "Brinjal", "Chilli", "Bell Pepper",
+    "Ginger", "Turmeric", "Garlic", "Cabbage", "Cauliflower", "Broccoli", "Carrot",
+    "Radish", "Beetroot", "Turnip", "Spinach (Palak)", "Fenugreek (Methi)", "Coriander",
+    "Mint", "Lettuce", "Okra (Bhindi)", "Bitter Gourd (Karela)", "Bottle Gourd (Lauki)",
+    "Ridge Gourd (Turai)", "Pumpkin", "Ash Gourd", "Cucumber", "Watermelon", "Muskmelon",
+    "Banana", "Mango", "Papaya", "Guava", "Pomegranate", "Apple", "Grapes", "Orange",
+    "Lemon", "Sapota (Chikoo)", "Pineapple", "Jackfruit", "Custard Apple", "Fig",
+    "Date", "Coconut", "Arecanut", "Cashew", "Rubber", "Tea", "Coffee", "Cardamom",
+    "Black Pepper", "Clove", "Nutmeg", "Vanilla", "Cinnamon", "Turmeric Finger",
+    "Jute", "Bamboo", "Tapioca (Cassava)", "Yam", "Elephant Foot Yam", "Gooseberry (Amla)",
+    "Drumstick (Moringa)", "Basil (Tulsi)", "Hibiscus", "Agave",
+]
+
+
+def fetch_crop_names():
+    known = list(CROP_CATALOG)
+    df = fetch_all("crops", "name")
+    if not df.empty and "name" in df.columns:
+        for n in df["name"].dropna():
+            n = str(n).strip()
+            if n and n.lower() not in (c.lower() for c in known):
+                known.append(n)
+    for n in st.session_state.get("added_crops", []):
+        n = str(n).strip()
+        if n and n.lower() not in (c.lower() for c in known):
+            known.append(n)
+    return known
+
+
+def in_stock_crops():
+    stock = set()
+    df = fetch_all("active_listings_view", "crop_name")
+    if not df.empty and "crop_name" in df.columns:
+        stock = {str(n).strip() for n in df["crop_name"].dropna()}
+    return stock
+
+
+def ordered_crop_options():
+    pinned = [str(c).strip() for c in st.session_state.get("pinned_crops", [])]
+    stock = in_stock_crops()
+    all_crops = fetch_crop_names()
+
+    def rank(c):
+        if c in pinned:
+            return 0
+        if c in stock:
+            return 1
+        return 2
+
+    ordered = sorted(all_crops, key=lambda c: (rank(c), c.lower()))
+    ordered.append(ADD_NEW_CROP)
+    return ordered, set(pinned), stock
+
+
+def crop_option_label(c, pinned, stock):
+    if c is None:
+        return ""
+    if c == ADD_NEW_CROP:
+        return c
+    if c in pinned:
+        return "📌 " + c
+    if c in stock:
+        return "✅ " + c + " · in stock"
+    return c
+
+
+def ensure_crop(name):
+    name = title_case(str(name or "").strip())
+    if not name:
+        return name
+    try:
+        existing = set()
+        df = fetch_all("crops", "name")
+        if not df.empty and "name" in df.columns:
+            existing = {str(n).strip().lower() for n in df["name"].dropna()}
+        if name.lower() not in existing:
+            insert_row(
+                "crops",
+                {
+                    "name": name,
+                    "seasons": ["Winter", "Summer", "Monsoon", "Autumn", "Spring"],
+                    "revenue_min": "—",
+                    "revenue_max": "—",
+                    "market_outlook": "Added from the app.",
+                },
+            )
+        st.session_state.setdefault("added_crops", [])
+        if name not in st.session_state["added_crops"]:
+            st.session_state["added_crops"].append(name)
+    except Exception as e:
+        _record_db_error(e)
+    return name
+
+
+def render_crop_pinner():
+    all_crops = fetch_crop_names()
+    current = st.session_state.get("pinned_crops", [])
+    picked = st.multiselect(
+        "📌 Pin crops — pinned crops always appear at the top of crop lists",
+        options=all_crops,
+        default=[c for c in current if c in all_crops],
+        placeholder="Choose crops to pin…",
+    )
+    pinned = list(dict.fromkeys(str(c).strip() for c in picked))
+    st.session_state["pinned_crops"] = pinned
+    stock = in_stock_crops()
+    return pinned, stock
+
 
 st.set_page_config(
     page_title="AgriConnect",
@@ -72,132 +215,154 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-# ============================================================
-# CUSTOM UI STYLING - ENHANCED
-# ============================================================
-
 st.markdown(
     """
     <style>
-
-    /* =========================================================
-       AGRICONNECT — PREMIUM LIGHT UI WITH ENHANCED STYLING
-       ========================================================= */
-
-    /* Distinct display + body pairing so the app reads as its own product
-       instead of the generic Streamlit default typeface. This @import is
-       what lets the custom HTML blocks below (.hero-title, .feature-card,
-       etc.) pick up the fonts — the same two fonts are also set natively
-       in .streamlit/config.toml (theme.font / theme.headingFont) so every
-       built-in widget matches too. */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
-
-    * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-    }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
     :root {
-        --agri-green: #2F6B3C;
-        --agri-green-dark: #1F4D2B;
-        --agri-green-light: #E5F3E8;
-        --agri-green-soft: #EEF7F0;
-        --agri-border: #DCE8DF;
-        --agri-text: #1E293B;
-        --agri-muted: #64748B;
-        --agri-light-muted: #94A3B8;
+        --agri-green: #059669;
+        --agri-green-dark: #047857;
+        --agri-green-deep: #065F46;
+        --agri-green-light: #ECFDF5;
+        --agri-green-soft: #F0FDF4;
+        --agri-lime: #34D399;
+        --agri-border: #E6EBE8;
+        --agri-text: #000000;
+        --agri-muted: #1A1A1A;
+        --agri-light-muted: #4B5563;
         --agri-surface: #FFFFFF;
-        --agri-page: #F7FAF8;
+        --agri-page: #FFFFFF;
+        --agri-glass: rgba(255, 255, 255, 0.72);
         --agri-error: #DC2626;
-        --agri-warning: #F59E0B;
-        --agri-success: #10B981;
-        --agri-info: #3B82F6;
+        --agri-warning: #D97706;
+        --agri-success: #059669;
+        --agri-info: #2563EB;
 
         --agri-font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        --agri-font-heading: 'Manrope', 'Inter', -apple-system, sans-serif;
+        --agri-font-heading: 'Space Grotesk', 'Inter', -apple-system, sans-serif;
 
-        --agri-shadow-sm: 0 2px 8px rgba(31, 77, 43, 0.06);
-        --agri-shadow-md: 0 8px 24px rgba(31, 77, 43, 0.08);
-        --agri-shadow-lg: 0 16px 40px rgba(31, 77, 43, 0.14);
+        --agri-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+        --agri-shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.06);
+        --agri-shadow-md: 0 16px 44px rgba(15, 23, 42, 0.09);
+        --agri-shadow-lg: 0 24px 60px rgba(5, 150, 105, 0.16);
+        --agri-radius: 16px;
+
+        --glass-bg: rgba(255, 255, 255, 0.55);
+        --glass-bg-strong: rgba(255, 255, 255, 0.72);
+        --glass-border: rgba(255, 255, 255, 0.65);
+        --glass-blur: blur(18px) saturate(160%);
+        --glass-shadow: 0 10px 34px rgba(2, 6, 23, 0.09);
     }
 
-    /* ========= BASE ========= */
-    html {
-        scroll-behavior: smooth;
-    }
+    html { scroll-behavior: smooth; }
 
     .stApp {
-        background: var(--agri-page);
+        background-color: #FFFFFF;
+        background-image:
+            radial-gradient(46rem 46rem at 10% 6%, rgba(5, 150, 105, 0.12), transparent 62%),
+            radial-gradient(40rem 40rem at 92% 10%, rgba(16, 185, 129, 0.10), transparent 64%),
+            radial-gradient(44rem 44rem at 82% 94%, rgba(59, 130, 246, 0.07), transparent 66%);
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+        background-position: 0% 0%, 100% 0%, 0% 100%;
+        background-size: 130% 130%;
+        animation: agriAurora 36s ease-in-out infinite;
         color: var(--agri-text);
         font-family: var(--agri-font-body) !important;
     }
 
     [data-testid="stAppViewContainer"],
-    [data-testid="stMain"] {
-        background: var(--agri-page);
+    [data-testid="stMain"] { background: transparent; }
+
+    [data-testid="stMainBlockContainer"] {
+        max-width: 1180px;
+        padding: 2rem 1.5rem 4rem;
     }
 
-    .main .block-container {
-        max-width: 1400px;
-        padding-top: 2.5rem;
-        padding-bottom: 3rem;
-        padding-left: 1.5rem;
-        padding-right: 1.5rem;
+    ::selection { background: #D1FAE5; color: var(--agri-green-deep); }
+
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        box-shadow: none !important;
     }
 
-    ::selection {
-        background: var(--agri-green-light);
-        color: var(--agri-green-dark);
-    }
+    [data-testid="stDecoration"],
+    [data-testid="stToolbar"],
+    [data-testid="stAppDeployButton"] { display: none !important; }
 
-    /* ========= SIDEBAR ========= */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #F1F7F2 0%, #FFFFFF 100%);
-        border-right: 1px solid var(--agri-border);
+        background: var(--glass-bg-strong);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        border-right: 1px solid var(--glass-border);
     }
 
-    section[data-testid="stSidebar"] > div {
-        background: transparent;
+    section[data-testid="stSidebar"] > div { background: transparent; }
+
+    .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0.25rem 0 1rem;
     }
 
-    section[data-testid="stSidebar"] h1,
-    section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3 {
-        font-family: var(--agri-font-heading) !important;
-        color: var(--agri-green-dark) !important;
-        font-weight: 700 !important;
+    .brand-mark {
+        width: 44px;
+        height: 44px;
+        border-radius: 13px;
+        background: var(--agri-green-light);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
     }
 
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span {
-        color: var(--agri-text) !important;
-        font-weight: 500 !important;
+    .brand-name {
+        font-family: var(--agri-font-heading);
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--agri-green-deep);
+        line-height: 1.1;
     }
 
-    /* Navigation Radio Group */
+    .brand-tag {
+        font-size: 0.74rem;
+        color: var(--agri-muted);
+        font-weight: 500;
+    }
+
+    .nav-label {
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--agri-light-muted);
+        margin: 0.75rem 0 0.35rem;
+    }
+
+    section[data-testid="stSidebar"] div[role="radiogroup"] { gap: 4px; }
+
     section[data-testid="stSidebar"] div[role="radiogroup"] label {
-        background: transparent;
-        border: 2px solid transparent;
+        width: 100%;
+        border: 1px solid transparent;
         border-radius: 12px;
-        padding: 0.75rem 1rem;
-        margin: 0.35rem 0;
-        transition: all 0.3s ease;
-        color: var(--agri-text) !important;
-        font-weight: 600 !important;
+        padding: 0.6rem 0.8rem;
+        margin: 2px 0;
+        color: var(--agri-text);
+        font-weight: 600;
+        transition: all 0.2s ease;
         cursor: pointer;
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-        background: var(--agri-green-light);
-        border-color: var(--agri-border);
+        background: var(--agri-green-soft);
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
-        background: var(--agri-green) !important;
-        border-color: var(--agri-green) !important;
-        box-shadow: 0 4px 12px rgba(47, 107, 60, 0.25);
+        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime));
+        border-color: transparent;
+        box-shadow: 0 8px 20px rgba(5, 150, 105, 0.25);
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) * {
@@ -205,442 +370,1317 @@ st.markdown(
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
-        display: none;
+        display: none !important;
     }
 
-    /* ========= TYPOGRAPHY ========= */
-    h1 {
-        font-family: var(--agri-font-heading) !important;
-        color: var(--agri-text) !important;
-        font-weight: 800 !important;
-        letter-spacing: -0.03em !important;
-        line-height: 1.2 !important;
-        margin-bottom: 0.5rem !important;
+    section[data-testid="stSidebar"] div[role="radiogroup"] label p {
+        font-size: 0.95rem;
+        font-weight: 600;
     }
 
-    h2 {
+    h1, h2, h3, h4 {
         font-family: var(--agri-font-heading) !important;
         color: var(--agri-text) !important;
-        font-weight: 750 !important;
         letter-spacing: -0.02em !important;
-        margin-bottom: 0.35rem !important;
     }
 
-    h3 {
-        font-family: var(--agri-font-heading) !important;
-        color: var(--agri-text) !important;
-        font-weight: 700 !important;
-        letter-spacing: -0.01em !important;
-    }
+    h1 { font-weight: 700 !important; line-height: 1.15; }
+    h2, h3 { font-weight: 600 !important; }
 
-    p, .stMarkdown, .stText, label {
-        color: var(--agri-text) !important;
-        line-height: 1.6 !important;
-        font-weight: 500 !important;
-    }
+    p, .stMarkdown, label { color: var(--agri-text); }
 
-    .stMarkdown small {
+    [data-testid="stCaptionContainer"],
+    [data-testid="stCaptionContainer"] *,
+    .stCaption,
+    small {
         color: var(--agri-muted) !important;
-        font-weight: 500 !important;
     }
 
-    /* ========= BUTTONS ========= */
+    .page-subtitle {
+        color: var(--agri-muted) !important;
+        font-size: 1rem;
+        margin: -0.25rem 0 1.5rem;
+    }
+
+    .section-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--agri-green-dark);
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        margin-bottom: 0.5rem;
+    }
+
+    .section-label::before {
+        content: "";
+        width: 20px;
+        height: 2px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
+    }
+
     .stButton > button,
     .stFormSubmitButton > button {
         width: 100%;
-        border-radius: 11px !important;
-        border: 2px solid var(--agri-green) !important;
-        background: var(--agri-green) !important;
+        border-radius: 12px !important;
+        border: 1px solid transparent !important;
+        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime)) !important;
         color: #FFFFFF !important;
         font-family: var(--agri-font-body) !important;
-        font-weight: 700 !important;
-        letter-spacing: 0.01em !important;
-        padding: 0.75rem 1.25rem !important;
-        font-size: 1rem !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        box-shadow: 0 4px 12px rgba(47, 107, 60, 0.15) !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.01em;
+        padding: 0.7rem 1.2rem !important;
+        box-shadow: 0 8px 22px rgba(5, 150, 105, 0.28) !important;
+        transition: all 0.2s ease !important;
     }
 
     .stButton > button:hover,
     .stFormSubmitButton > button:hover {
-        background: var(--agri-green-dark) !important;
-        border-color: var(--agri-green-dark) !important;
-        color: #FFFFFF !important;
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(47, 107, 60, 0.3) !important;
+        filter: brightness(1.05);
+        transform: translateY(-1px);
+        box-shadow: 0 12px 28px rgba(5, 150, 105, 0.36) !important;
     }
 
     .stButton > button:active,
-    .stFormSubmitButton > button:active {
-        transform: translateY(0) !important;
-    }
+    .stFormSubmitButton > button:active { transform: translateY(0); }
 
-    /* ========= FORMS ========= */
     div[data-testid="stForm"] {
-        border: 2px solid var(--agri-border) !important;
-        border-radius: 18px !important;
-        padding: 2rem !important;
-        background: var(--agri-surface) !important;
-        box-shadow: var(--agri-shadow-lg) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: 20px !important;
+        background: var(--glass-bg-strong) !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+        padding: 1.75rem !important;
     }
 
-    div[data-testid="stForm"] > button {
-        margin-top: 1.5rem !important;
-    }
-
-    /* ========= INPUT FIELDS ========= */
-    .stTextInput > div > div > input,
-    .stTextArea > div > div > textarea,
-    .stNumberInput > div > div > input,
-    .stDateInput > div > div > input {
-        border-radius: 11px !important;
-        border: 2px solid var(--agri-border) !important;
-        padding: 0.75rem 1rem !important;
+    .stTextInput input,
+    .stNumberInput input,
+    .stDateInput input,
+    .stTextArea textarea {
+        border-radius: 12px !important;
+        border: 1px solid var(--agri-border) !important;
         background: #FFFFFF !important;
         color: var(--agri-text) !important;
         font-family: var(--agri-font-body) !important;
-        font-size: 1rem !important;
-        font-weight: 500 !important;
-        transition: all 0.3s ease !important;
+        padding: 0.65rem 0.85rem !important;
+        transition: all 0.2s ease !important;
     }
 
-    .stTextInput > div > div > input:focus,
-    .stTextArea > div > div > textarea:focus,
-    .stNumberInput > div > div > input:focus,
-    .stDateInput > div > div > input:focus {
+    .stTextInput input:focus,
+    .stNumberInput input:focus,
+    .stDateInput input:focus,
+    .stTextArea textarea:focus {
         border-color: var(--agri-green) !important;
-        box-shadow: 0 0 0 3px rgba(47, 107, 60, 0.1) !important;
+        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.14) !important;
     }
 
-    .stTextInput > div > div > input::placeholder,
-    .stTextArea > div > div > textarea::placeholder {
-        color: var(--agri-light-muted) !important;
-    }
+    .stTextInput input::placeholder,
+    .stTextArea textarea::placeholder { color: var(--agri-light-muted) !important; }
 
-    /* Selectbox */
     div[data-baseweb="select"] > div {
-        border-radius: 11px !important;
-        border: 2px solid var(--agri-border) !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--agri-border) !important;
         background: #FFFFFF !important;
-        transition: all 0.3s ease !important;
+        transition: all 0.2s ease !important;
     }
 
-    div[data-baseweb="select"] > div:hover {
-        border-color: var(--agri-green-light) !important;
-    }
-
-    div[data-baseweb="select"] > div:focus-visible {
+    div[data-baseweb="select"] > div:focus-within {
         border-color: var(--agri-green) !important;
-        box-shadow: 0 0 0 3px rgba(47, 107, 60, 0.1) !important;
+        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.14) !important;
     }
 
-    /* ========= CARDS ========= */
     .feature-card {
         height: 100%;
-        min-height: 200px;
-        padding: 28px;
-        border-radius: 18px;
-        border: 2px solid var(--agri-border);
-        background: var(--agri-surface);
-        box-shadow: var(--agri-shadow-md);
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        padding: 1.6rem;
+        border-radius: var(--agri-radius);
+        border: 1px solid var(--agri-border);
+        background: var(--agri-glass);
+        backdrop-filter: blur(12px) saturate(140%);
+        -webkit-backdrop-filter: blur(12px) saturate(140%);
+        box-shadow: var(--agri-shadow-sm);
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
         position: relative;
         overflow: hidden;
     }
 
     .feature-card::before {
-        content: '';
+        content: "";
         position: absolute;
         top: 0;
         left: 0;
         right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, var(--agri-green), transparent);
+        height: 3px;
+        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
+        opacity: 0.9;
     }
 
     .feature-card:hover {
-        transform: translateY(-6px);
-        box-shadow: var(--agri-shadow-lg);
-        border-color: var(--agri-green);
-    }
-
-    /* ========= METRICS ========= */
-    div[data-testid="stMetric"] {
-        background: var(--agri-surface);
-        border: 2px solid var(--agri-border);
-        padding: 1.25rem;
-        border-radius: 14px;
-        box-shadow: var(--agri-shadow-sm);
-    }
-
-    div[data-testid="stMetric"] > div {
-        font-weight: 600 !important;
-    }
-
-    /* ========= DATA TABLES ========= */
-    div[data-testid="stDataFrame"] {
-        border: 2px solid var(--agri-border) !important;
-        border-radius: 14px !important;
-        overflow: hidden;
-        background: var(--agri-surface) !important;
-        box-shadow: var(--agri-shadow-sm) !important;
-    }
-
-    [data-testid="stDataFrame"] tbody tr {
-        border-bottom: 1px solid var(--agri-border) !important;
-    }
-
-    [data-testid="stDataFrame"] tbody tr:hover {
-        background-color: var(--agri-green-soft) !important;
-    }
-
-    [data-testid="stDataFrame"] thead tr {
-        background: linear-gradient(90deg, var(--agri-green-light) 0%, #FFFFFF 100%) !important;
-        border-bottom: 2px solid var(--agri-border) !important;
-    }
-
-    [data-testid="stDataFrame"] th {
-        color: var(--agri-green-dark) !important;
-        font-weight: 700 !important;
-        padding: 1rem !important;
-    }
-
-    [data-testid="stDataFrame"] td {
-        padding: 0.875rem 1rem !important;
-        color: var(--agri-text) !important;
-    }
-
-    /* ========= ALERTS ========= */
-    /* Shape only. Per-type colour (green success / blue info / amber
-       warning / red error) now comes from .streamlit/config.toml's
-       greenColor / blueColor / orangeColor / redColor, which Streamlit
-       applies to st.success/info/warning/error natively. (The previous
-       rules tried to hand-recolour each alert here, but the "success"
-       selector targeted an auto-generated class name that doesn't
-       reliably exist, so the unqualified "warning" rule after it ended up
-       winning for every alert type. Driving colour from the theme avoids
-       that whole class of bug.) */
-    div[data-testid="stAlert"] {
-        border-radius: 14px !important;
-        padding: 1rem 1.25rem !important;
-        font-weight: 600 !important;
-        box-shadow: var(--agri-shadow-sm);
-    }
-
-    div[data-testid="stAlert"] [data-testid="stAlertTitle"] {
-        font-weight: 700 !important;
-    }
-
-    /* ========= HERO ========= */
-    .hero {
-        padding: 48px;
-        border-radius: 22px;
-        background: linear-gradient(135deg, var(--agri-green-light) 0%, #F9FCF9 70%);
-        border: 2px solid var(--agri-border);
-        margin-bottom: 36px;
+        transform: translateY(-4px);
         box-shadow: var(--agri-shadow-md);
+        border-color: #D1FAE5;
     }
 
-    .hero-title {
-        font-family: var(--agri-font-heading);
-        font-size: clamp(36px, 5vw, 52px);
-        font-weight: 800;
-        color: var(--agri-green-dark);
-        margin-bottom: 14px;
-        letter-spacing: -0.04em;
-        line-height: 1.1;
-    }
-
-    .hero-subtitle {
-        font-size: 18px;
-        color: var(--agri-muted);
-        max-width: 800px;
-        line-height: 1.8;
-        font-weight: 500;
-    }
-
-    /* ========= SECTION LABELS ========= */
-    .section-label {
-        font-family: var(--agri-font-body);
-        color: var(--agri-green);
-        font-size: 12px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 8px;
-        display: inline-block;
-    }
-
-    /* ========= FEATURE ICONS & TEXT ========= */
     .feature-icon {
-        font-size: 42px;
-        line-height: 1;
-        display: inline-block;
-        margin-bottom: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 52px;
+        height: 52px;
+        border-radius: 14px;
+        background: var(--agri-green-light);
+        font-size: 26px;
+        margin-bottom: 0.9rem;
     }
 
     .feature-title {
         font-family: var(--agri-font-heading);
-        font-size: 20px;
-        font-weight: 700;
-        color: var(--agri-green-dark);
-        margin-bottom: 8px;
+        font-size: 1.08rem;
+        font-weight: 600;
+        color: var(--agri-text);
+        margin-bottom: 0.35rem;
     }
 
     .feature-text {
         color: var(--agri-muted);
+        font-size: 0.92rem;
+        line-height: 1.65;
+    }
+
+    .hero {
+        position: relative;
+        overflow: hidden;
+        padding: 3rem 2.5rem;
+        border-radius: 24px;
+        border: 1px solid var(--agri-border);
+        background: radial-gradient(120% 160% at 0% 0%, #ECFDF5 0%, #FFFFFF 60%);
+        box-shadow: var(--agri-shadow-sm);
+        margin-bottom: 2rem;
+    }
+
+    .hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+            linear-gradient(rgba(5, 150, 105, 0.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(5, 150, 105, 0.05) 1px, transparent 1px);
+        background-size: 34px 34px;
+        -webkit-mask-image: radial-gradient(120% 120% at 100% 0%, #000 0%, transparent 55%);
+        mask-image: radial-gradient(120% 120% at 100% 0%, #000 0%, transparent 55%);
+    }
+
+    .hero-title {
+        font-family: var(--agri-font-heading);
+        font-size: clamp(2rem, 4.4vw, 3rem);
+        font-weight: 700;
+        color: var(--agri-green-deep);
+        letter-spacing: -0.03em;
+        line-height: 1.08;
+        margin-bottom: 0.75rem;
+    }
+
+    .hero-subtitle {
+        font-size: 1.05rem;
+        color: var(--agri-muted);
+        max-width: 640px;
         line-height: 1.7;
-        margin-top: 8px;
-        font-weight: 500;
-        font-size: 15px;
     }
 
-    /* ========= COLUMN GAPS ========= */
-    div[data-testid="column"] {
-        gap: 1.5rem !important;
+    div[data-testid="stMetric"] {
+        background: var(--agri-glass);
+        border: 1px solid var(--agri-border);
+        border-radius: var(--agri-radius);
+        padding: 1rem 1.1rem;
+        box-shadow: var(--agri-shadow-xs);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
     }
 
-    /* ========= DIVIDERS ========= */
-    hr {
-        border: 0;
-        border-top: 2px solid var(--agri-border);
-        margin: 1.5rem 0 !important;
+    div[data-testid="stMetricLabel"] { color: var(--agri-muted) !important; font-weight: 600 !important; }
+
+    div[data-testid="stMetricValue"] {
+        font-family: var(--agri-font-heading) !important;
+        color: var(--agri-text) !important;
+        font-weight: 600 !important;
     }
 
-    /* ========= ACCESSIBILITY ========= */
-    button:focus-visible,
-    a:focus-visible,
-    input:focus-visible,
-    textarea:focus-visible,
-    [role="radio"]:focus-visible,
-    section[data-testid="stSidebar"] div[role="radiogroup"] label:focus-within {
-        outline: 2px solid var(--agri-green) !important;
-        outline-offset: 2px !important;
+    div[data-testid="stDataFrame"] {
+        border: 1px solid var(--agri-border) !important;
+        border-radius: var(--agri-radius) !important;
+        overflow: hidden;
+        background: #FFFFFF !important;
+        box-shadow: var(--agri-shadow-xs) !important;
     }
 
-    @media (prefers-reduced-motion: reduce) {
-        *,
-        *::before,
-        *::after {
-            animation-duration: 0.001ms !important;
-            transition-duration: 0.001ms !important;
-        }
-
-        .feature-card:hover,
-        .stButton > button:hover,
-        .stFormSubmitButton > button:hover {
-            transform: none !important;
-        }
+    .st-key-agri_glass_a,
+    .st-key-agri_glass_b {
+        background: var(--glass-bg) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: 18px !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
     }
 
-    /* ========= RESPONSIVE ========= */
+    div[data-testid="stExpander"] {
+        background: var(--glass-bg) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: 16px !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+        overflow: hidden;
+    }
+
+    div[data-testid="stExpander"] details,
+    div[data-testid="stExpander"] summary { background: transparent !important; }
+
+    div[data-testid="stAlert"] {
+        background: var(--glass-bg-strong) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: 14px !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+        padding: 0.9rem 1.1rem !important;
+        font-weight: 500 !important;
+    }
+
+    div[data-testid="stDataFrame"],
+    div[data-testid="stTable"] {
+        background: var(--glass-bg) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: var(--agri-radius) !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+        overflow: hidden;
+    }
+
+    div[data-testid="stMetric"] {
+        background: var(--glass-bg) !important;
+        border: 1px solid var(--glass-border) !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+    }
+
+    div[data-baseweb="popover"] > div,
+    div[data-baseweb="menu"],
+    ul[data-testid="stSelectboxVirtualDropdown"],
+    div[data-testid="stSelectboxVirtualDropdown"] {
+        background: var(--glass-bg-strong) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: 14px !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+    }
+
+    div[data-testid="stDialog"] > div,
+    div[data-testid="stModal"] > div,
+    div[role="dialog"] > div {
+        background: var(--glass-bg-strong) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: 20px !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+    }
+
+    div[data-testid="stTabs"] button[role="tab"] {
+        background: transparent !important;
+        border-radius: 12px !important;
+        transition: all 0.2s ease;
+    }
+
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        background: var(--glass-bg-strong) !important;
+        border: 1px solid var(--glass-border) !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+    }
+
+    div[data-testid="stSidebarUserContent"] .stButton > button {
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+    }
+
+    hr { border: 0; border-top: 1px solid var(--agri-border); margin: 1.25rem 0; }
+
     @media (max-width: 1024px) {
-        .main .block-container {
-            max-width: 100%;
-            padding-left: 1.2rem;
-            padding-right: 1.2rem;
-        }
-
-        div[data-testid="stForm"] {
-            padding: 1.5rem !important;
-        }
-
-        .hero {
-            padding: 36px;
-        }
-
-        .hero-title {
-            font-size: clamp(28px, 4vw, 42px);
-        }
-    }
-
-    @media (max-width: 768px) {
-        .main .block-container {
-            padding: 1rem 1rem;
-        }
-
-        .hero {
-            padding: 28px;
-            margin-bottom: 24px;
-        }
-
-        .hero-title {
-            font-size: 30px;
-            margin-bottom: 10px;
-        }
-
-        .hero-subtitle {
-            font-size: 16px;
-        }
-
-        div[data-testid="stForm"] {
-            padding: 1.25rem !important;
-            border-radius: 14px !important;
-        }
-
-        .feature-card {
-            min-height: 160px;
-            padding: 20px;
-        }
-
-        .feature-icon {
-            font-size: 36px;
-        }
-
-        .feature-title {
-            font-size: 18px;
-        }
+        [data-testid="stMainBlockContainer"] { padding: 1.5rem 1.25rem 3rem; }
+        .hero { padding: 2.25rem 1.75rem; }
     }
 
     @media (max-width: 640px) {
-        .main .block-container {
-            max-width: 100%;
-            padding-top: 1.5rem;
-            padding-bottom: 2rem;
-        }
+        [data-testid="stMainBlockContainer"] { padding: 1rem 1rem 2.25rem; }
+        .hero { padding: 1.75rem 1.25rem; border-radius: 18px; }
+        .hero-title { font-size: 1.7rem; }
+        .feature-card { padding: 1.25rem; }
+    }
 
-        h1 {
-            font-size: 24px !important;
-        }
+    /* ========= REACTIVE / ENHANCED INTERACTIONS ========= */
 
-        .hero-title {
-            font-size: 24px;
-        }
+    @keyframes agriRise {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
 
-        .hero-subtitle {
-            font-size: 15px;
+    @keyframes agriFloat {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50% { transform: translate(20px, -24px) scale(1.08); }
+    }
+
+    @keyframes agriNavGlow {
+        0%, 100% { box-shadow: 0 8px 20px rgba(5, 150, 105, 0.25); }
+        50% { box-shadow: 0 8px 28px rgba(5, 150, 105, 0.45); }
+    }
+
+    @keyframes agriAurora {
+        0%, 100% { background-position: 0% 0%, 100% 0%, 0% 100%; }
+        33% { background-position: 12% 10%, 86% 6%, 8% 94%; }
+        66% { background-position: 6% 8%, 92% 14%, 16% 90%; }
+    }
+
+    @keyframes agriPulse {
+        0%, 100% { opacity: 0.65; }
+        50% { opacity: 1; }
+    }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: #F3F6F4; }
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, var(--agri-green), var(--agri-lime));
+        border-radius: 999px;
+        border: 2px solid #F3F6F4;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--agri-green-deep); }
+
+    *:focus-visible {
+        outline: 2px solid var(--agri-green) !important;
+        outline-offset: 2px !important;
+        border-radius: 6px;
+    }
+
+    a {
+        color: var(--agri-green-dark);
+        transition: color 0.2s ease;
+    }
+    a:hover { color: var(--agri-green); }
+
+    [data-testid="stFooter"] { display: none !important; }
+
+    .brand-mark { animation: agriFloat 7s ease-in-out infinite; }
+
+    .section-label::before { animation: agriPulse 2.8s ease-in-out infinite; }
+
+    .hero {
+        transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+    }
+    .hero:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 26px 60px rgba(5, 150, 105, 0.15);
+        border-color: #D1FAE5;
+    }
+    .hero::before {
+        content: "";
+        position: absolute;
+        right: -90px;
+        top: -90px;
+        width: 280px;
+        height: 280px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 30%, rgba(52, 211, 153, 0.35), rgba(5, 150, 105, 0) 70%);
+        filter: blur(12px);
+        pointer-events: none;
+        animation: agriFloat 9s ease-in-out infinite;
+        z-index: 0;
+    }
+    .hero-title { transition: transform 0.2s ease, color 0.2s ease; }
+    .hero:hover .hero-title { transform: translateX(5px); }
+    .hero * { position: relative; z-index: 1; }
+
+    .feature-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.6) 50%, transparent 70%);
+        transform: translateX(-130%) skewX(-16deg);
+        transition: transform 0.7s ease;
+        pointer-events: none;
+    }
+    .feature-card:hover::after { transform: translateX(130%) skewX(-16deg); }
+
+    .stButton > button,
+    .stFormSubmitButton > button {
+        position: relative;
+        overflow: hidden;
+    }
+    .stButton > button::after,
+    .stFormSubmitButton > button::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 45%;
+        background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+        transform: translateX(-160%) skewX(-18deg);
+        transition: transform 0.6s ease;
+        pointer-events: none;
+    }
+    .stButton > button:hover::after,
+    .stFormSubmitButton > button:hover::after { transform: translateX(260%) skewX(-18deg); }
+    .stButton > button:active,
+    .stFormSubmitButton > button:active { transform: scale(0.98); }
+
+    div[data-testid="stMetric"] {
+        animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 18px 44px rgba(5, 150, 105, 0.16) !important;
+        border-color: var(--agri-lime) !important;
+    }
+
+    div[data-testid="stExpander"] {
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    div[data-testid="stExpander"]:hover {
+        transform: translateY(-2px);
+        border-color: rgba(5, 150, 105, 0.4) !important;
+        box-shadow: 0 16px 40px rgba(5, 150, 105, 0.12) !important;
+    }
+
+    div[data-testid="stDataFrame"],
+    div[data-testid="stTable"] {
+        animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        transition: box-shadow 0.25s ease, border-color 0.25s ease;
+    }
+    div[data-testid="stDataFrame"]:hover {
+        box-shadow: 0 16px 44px rgba(5, 150, 105, 0.14) !important;
+        border-color: #D1FAE5 !important;
+    }
+
+    div[data-testid="stForm"] { animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+    div[data-testid="stAlert"] { animation: agriRise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+    div[data-testid="stTabs"] button[role="tab"]:hover {
+        background: rgba(5, 150, 105, 0.08) !important;
+    }
+
+    section[data-testid="stSidebar"] div[role="radiogroup"] label {
+        transition: all 0.22s ease;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+        transform: translateX(3px);
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+        animation: agriNavGlow 3s ease-in-out infinite;
+    }
+
+    [data-testid="stVegaLiteChart"],
+    [data-testid="stPlotlyChart"] {
+        background: var(--glass-bg) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-radius: var(--agri-radius) !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        box-shadow: var(--glass-shadow) !important;
+    }
+
+    [data-testid="stImage"] {
+        border: 1px solid var(--agri-border);
+        border-radius: var(--agri-radius);
+        overflow: hidden;
+        box-shadow: var(--agri-shadow-sm);
+    }
+
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(1) .feature-card,
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(1) div[data-testid="stMetric"] { animation-delay: 0.06s; }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2) .feature-card,
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2) div[data-testid="stMetric"] { animation-delay: 0.14s; }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) .feature-card,
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) div[data-testid="stMetric"] { animation-delay: 0.22s; }
+
+    /* ========= MICRO-INTERACTIONS II ========= */
+
+    input, textarea { caret-color: var(--agri-green); }
+
+    div[data-baseweb="input"] {
+        border-radius: 12px !important;
+        border-color: var(--agri-border) !important;
+        background: #FFFFFF !important;
+        transition: all 0.2s ease !important;
+    }
+
+    div[data-baseweb="input"]:focus-within {
+        border-color: var(--agri-green) !important;
+        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.14) !important;
+    }
+
+    div[data-testid="stNumberInput"] button {
+        border-radius: 8px !important;
+        transition: all 0.15s ease !important;
+    }
+    div[data-testid="stNumberInput"] button:hover {
+        background: var(--agri-green-light) !important;
+    }
+
+    .stMarkdown code {
+        background: var(--agri-green-light);
+        color: var(--agri-green-deep);
+        border-radius: 6px;
+        padding: 0.15em 0.4em;
+        font-size: 0.88em;
+    }
+
+    .stMarkdown pre {
+        border: 1px solid var(--agri-border);
+        border-radius: 12px;
+        background: #F8FAF9 !important;
+        padding: 1rem;
+    }
+
+    table {
+        border-collapse: separate;
+        border-spacing: 0;
+        border: 1px solid var(--agri-border) !important;
+        border-radius: 12px !important;
+        overflow: hidden;
+    }
+    .stMarkdown table thead th {
+        background: var(--agri-green-soft) !important;
+        color: var(--agri-green-deep) !important;
+        font-weight: 700;
+    }
+
+    .stMarkdown blockquote {
+        border-left: 3px solid var(--agri-green);
+        background: var(--agri-green-light);
+        border-radius: 0 10px 10px 0;
+        padding: 0.6rem 1rem;
+    }
+
+    h2::after {
+        content: "";
+        display: block;
+        width: 54px;
+        height: 3px;
+        border-radius: 3px;
+        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
+        margin-top: 0.3rem;
+    }
+
+    .hero-title {
+        background: linear-gradient(120deg, var(--agri-green-deep), var(--agri-green) 55%, #10B981);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .feature-icon {
+        transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .feature-card:hover .feature-icon {
+        transform: scale(1.12) rotate(-6deg);
+    }
+
+    .feature-card::before {
+        transform-origin: left;
+        animation: agriAccentIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+    }
+    .feature-card:hover::before { filter: brightness(1.08); }
+
+    @keyframes agriAccentIn {
+        from { transform: scaleX(0); }
+        to { transform: scaleX(1); }
+    }
+
+    .stButton > button,
+    .stFormSubmitButton > button {
+        background-size: 160% 160% !important;
+        background-position: 0% 50% !important;
+    }
+    .stButton > button:hover,
+    .stFormSubmitButton > button:hover {
+        background-position: 100% 50% !important;
+        filter: brightness(1.04);
+    }
+
+    div[data-testid="stForm"],
+    .st-key-agri_glass_a,
+    .st-key-agri_glass_b {
+        position: relative;
+    }
+    div[data-testid="stForm"]::before,
+    .st-key-agri_glass_a::before,
+    .st-key-agri_glass_b::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 26px;
+        border-radius: 20px 20px 0 0;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent);
+        pointer-events: none;
+    }
+
+    hr {
+        border: 0 !important;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--agri-lime), var(--agri-green), transparent);
+        opacity: 0.5;
+        margin: 1.25rem 0;
+    }
+
+    div[data-testid="stTabs"] button[role="tab"] {
+        border-bottom: 2px solid transparent !important;
+    }
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        border-bottom: 2px solid var(--agri-green) !important;
+    }
+
+    @media (max-width: 768px) {
+        :root { --glass-blur: blur(10px) saturate(150%); }
+    }
+
+    /* ========= MICRO-INTERACTIONS III ========= */
+
+    .stTextInput input,
+    .stTextArea textarea { text-transform: capitalize; }
+
+    input[type="range"],
+    input[type="checkbox"] { accent-color: var(--agri-green); }
+
+    * { -webkit-tap-highlight-color: transparent; }
+
+    [data-baseweb="tag"] {
+        border-radius: 999px !important;
+        background: var(--agri-green-light) !important;
+        color: var(--agri-green-deep) !important;
+        border: 1px solid #A7F3D0 !important;
+        font-weight: 600;
+    }
+    [data-baseweb="tag"] span,
+    [data-baseweb="tag"] svg { color: var(--agri-green-deep) !important; }
+    [data-baseweb="tag"] button:hover { background: transparent !important; }
+
+    .hint-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0.25rem 0 1rem;
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0.32rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        border: 1px solid var(--agri-border);
+        background: var(--agri-green-light);
+        color: var(--agri-green-deep);
+        animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .chip.pinned { background: #FFFBEB; border-color: #FDE68A; color: #92400E; }
+
+    .stSelectbox div[data-baseweb="select"] > div:hover {
+        border-color: var(--agri-lime) !important;
+    }
+
+    /* ========= MICRO-INTERACTIONS IV ========= */
+
+    .crop-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0.2rem 0 0.4rem;
+        font-family: var(--agri-font-heading);
+        font-weight: 600;
+        color: var(--agri-text);
+        animation: agriRise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .crop-slot-index {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 26px;
+        height: 26px;
+        padding: 0 9px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime));
+        color: #FFFFFF;
+        font-size: 0.76rem;
+        font-weight: 700;
+        box-shadow: 0 4px 12px rgba(5, 150, 105, 0.32);
+    }
+
+    div[data-testid="stForm"]::after {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        border-radius: 20px;
+        padding: 1.5px;
+        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime), var(--agri-green));
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        mask-composite: exclude;
+        opacity: 0;
+        transition: opacity 0.35s ease;
+        pointer-events: none;
+        z-index: 0;
+    }
+    div[data-testid="stForm"]:hover::after,
+    div[data-testid="stForm"]:focus-within::after { opacity: 1; }
+
+    strong { color: var(--agri-green-deep); }
+
+    .stMarkdown li::marker { color: var(--agri-green); font-weight: 700; }
+
+    .stButton > button {
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
+            0 8px 22px rgba(5, 150, 105, 0.26) !important;
+    }
+
+    .brand:hover .brand-mark {
+        box-shadow: 0 0 0 6px rgba(52, 211, 153, 0.18);
+        transition: box-shadow 0.3s ease;
+    }
+
+    div[data-testid="stExpander"] summary::marker,
+    div[data-testid="stExpander"] summary::-webkit-details-marker {
+        color: var(--agri-green);
+    }
+
+    div[data-baseweb="menu"] li,
+    div[data-testid="stSelectboxVirtualDropdown"] li {
+        border-radius: 8px;
+        margin: 0 4px;
+    }
+    div[data-baseweb="menu"] li:hover,
+    div[data-testid="stSelectboxVirtualDropdown"] li:hover {
+        background: var(--agri-green-soft) !important;
+    }
+
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+        -webkit-box-shadow: 0 0 0 1000px #FFFFFF inset;
+        -webkit-text-fill-color: var(--agri-text);
+        transition: background-color 9999s ease-in-out 0s;
+    }
+
+    div[data-testid="stFormSubmitButton"] button {
+        min-height: 2.7rem;
+        font-weight: 700;
+    }
+
+    [data-testid="stCaptionContainer"] strong,
+    [data-testid="stCaptionContainer"] em { color: var(--agri-green-deep); }
+
+    /* ========= MICRO-INTERACTIONS V ========= */
+
+    ::selection {
+        background: var(--agri-lime);
+        color: var(--agri-green-deep);
+    }
+
+    .slot-hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0.55rem 1rem;
+        border-radius: 12px;
+        border: 1px dashed #A7F3D0;
+        background: rgba(209, 250, 229, 0.55);
+        color: var(--agri-green-deep);
+        font-size: 0.82rem;
+        font-weight: 600;
+        animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .slot-hint b {
+        color: var(--agri-green);
+        font-size: 1.02rem;
+    }
+
+    .stButton > button {
+        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+            box-shadow 0.25s ease,
+            background-color 0.25s ease !important;
+    }
+    .stButton > button:not(:disabled):hover {
+        transform: translateY(-1px);
+    }
+    .stButton > button:not(:disabled):active {
+        transform: translateY(0) scale(0.97);
+    }
+
+    div[data-testid="stFormSubmitButton"] button:not(:disabled):hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 28px rgba(5, 150, 105, 0.34) !important;
+    }
+    div[data-testid="stFormSubmitButton"] button:focus-visible {
+        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.28) !important;
+    }
+
+    div[data-testid="stMetric"] {
+        transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+            box-shadow 0.3s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 2px 0 0 var(--agri-lime), var(--glass-shadow) !important;
+    }
+
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 { letter-spacing: 0.3px; }
+    [data-testid="stCaptionContainer"] { letter-spacing: 0.2px; }
+
+    div[data-testid="stCodeBlock"] {
+        background: rgba(255, 255, 255, 0.72) !important;
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--agri-border);
+        border-radius: 14px;
+        overflow: hidden;
+    }
+
+    [data-testid="stWidgetLabel"] { font-weight: 600; color: var(--agri-text); }
+
+    input, select, textarea { cursor: text; }
+    [data-testid="stSidebar"] button,
+    [data-testid="stSidebar"] [role="radio"],
+    [role="tab"] { cursor: pointer !important; }
+
+    [role="tab"] svg { transition: transform 0.3s ease; }
+    [role="tab"]:hover svg { transform: rotate(-8deg); }
+
+    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] ,
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 12px;
+    }
+
+    .feature-icon { transition: transform 0.3s ease; }
+    .feature-card:hover .feature-icon { transform: scale(1.12) rotate(-3deg); }
+
+    .creators {
+        margin-top: 1rem;
+        padding: 1px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(52, 211, 153, 0.6), rgba(6, 95, 70, 0.06) 48%, rgba(5, 150, 105, 0.45));
+        box-shadow: 0 18px 40px -22px rgba(5, 150, 105, 0.45);
+        animation: agriRise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .creators-inner {
+        background: rgba(255, 255, 255, 0.85);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+        border-radius: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.65);
+        padding: 0.9rem 1rem 1rem;
+    }
+    .creators-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--agri-font-heading);
+        font-size: 0.7rem;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        background: linear-gradient(120deg, var(--agri-green-deep), var(--agri-green));
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.6rem;
+    }
+    .creators-title::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(90deg, rgba(6, 95, 70, 0.28), transparent);
+    }
+    .creators ul { list-style: none; margin: 0; padding: 0; }
+    .creators li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0.18rem 0;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--agri-muted);
+        transition: color 0.2s ease, transform 0.2s ease;
+    }
+    .creators li:hover { color: var(--agri-green-deep); transform: translateX(2px); }
+    .creators .avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #065f46, #10b981);
+        color: #FFFFFF;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+        box-shadow: 0 4px 12px -3px rgba(5, 150, 105, 0.55);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .creators li:hover .avatar {
+        transform: scale(1.08);
+        box-shadow: 0 6px 16px -4px rgba(5, 150, 105, 0.7);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01s !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01s !important;
         }
     }
 
+    .st-key-home_top {
+        position: fixed;
+        top: 0.85rem;
+        right: 1.35rem;
+        z-index: 1000000;
+        width: auto !important;
+    }
+    .st-key-home_top button {
+        width: auto !important;
+        padding: 0.5rem 1.1rem !important;
+        border-radius: 999px !important;
+        background: rgba(255, 255, 255, 0.82) !important;
+        color: var(--agri-green-deep) !important;
+        border: 1px solid var(--agri-border) !important;
+        font-weight: 700 !important;
+        box-shadow: var(--glass-shadow) !important;
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+    }
+    .st-key-home_top button:hover {
+        background: #FFFFFF !important;
+        border-color: var(--agri-green) !important;
+        box-shadow: 0 10px 24px rgba(5, 150, 105, 0.22) !important;
+        transform: translateY(-1px);
+    }
+    @media (max-width: 640px) {
+        .st-key-home_top { top: 0.6rem; right: 0.75rem; }
+    }
+
+    .login-head {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin: 1rem 0 1.25rem;
+        padding: 1.4rem 1.5rem;
+        border-radius: 20px;
+        border: 1px solid var(--glass-border);
+        background: linear-gradient(135deg, #ECFDF5 0%, rgba(255, 255, 255, 0.65) 70%);
+        box-shadow: var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+    }
+    .login-mark { font-size: 2.1rem; line-height: 1; }
+    .login-brand {
+        font-family: var(--agri-font-heading);
+        font-weight: 700;
+        font-size: 1.55rem;
+        color: var(--agri-green-deep);
+        letter-spacing: -0.02em;
+    }
+    .login-tag { color: var(--agri-muted); font-size: 0.9rem; }
+
+    .whoami {
+        margin: 0.35rem 0 0.6rem;
+        padding: 0.55rem 0.75rem;
+        border-radius: 12px;
+        border: 1px solid var(--glass-border);
+        background: var(--glass-bg);
+        color: var(--agri-text);
+        font-size: 0.85rem;
+        line-height: 1.3;
+    }
+    .whoami-role {
+        display: inline-block;
+        margin-top: 4px;
+        padding: 0.05rem 0.5rem;
+        border-radius: 999px;
+        background: var(--agri-green-light);
+        color: var(--agri-green-deep);
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .st-key-logout button {
+        background: transparent !important;
+        color: #B91C1C !important;
+        border: 1px solid rgba(185, 28, 28, 0.35) !important;
+        box-shadow: none !important;
+    }
+    .st-key-logout button:hover {
+        background: #FEF2F2 !important;
+        border-color: #B91C1C !important;
+        transform: none;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-# ============================================================
-# SIDEBAR - ENHANCED NAVIGATION
-# ============================================================
+def page_header(eyebrow, title, subtitle=None):
+    st.markdown(f'<div class="section-label">{eyebrow}</div>', unsafe_allow_html=True)
+    st.header(title, anchor=False)
+    if subtitle:
+        st.markdown(f'<p class="page-subtitle">{subtitle}</p>', unsafe_allow_html=True)
+
+
+def _go_home():
+    st.session_state["nav"] = "🏠 Home"
+
+
+def _go_to(target):
+    st.session_state["nav"] = target
+
+
+def _logout():
+    st.session_state.pop("auth", None)
+    st.session_state["nav"] = "🏠 Home"
+
+
+def _skip_login():
+    st.session_state["auth"] = {"role": "guest", "id": None, "name": "Guest"}
+    st.session_state["nav"] = "🏠 Home"
+
+
+AADHAAR_RE = re.compile(r"^[0-9]{12}$")
+
+
+def _attempt_login(role, aadhaar):
+    if not AADHAAR_RE.match((aadhaar or "").strip()):
+        return False, "Enter a valid 12-digit Aadhaar number."
+    if supabase is None:
+        return False, "The database is not configured. Set SUPABASE_URL and SUPABASE_KEY."
+    fn = "aadhaar_farmer_login" if role == "farmer" else "aadhaar_buyer_login"
+    id_col = "farmer_id" if role == "farmer" else "buyer_id"
+    try:
+        rows = supabase.rpc(fn, {"p_aadhaar": aadhaar.strip()}).execute().data or []
+    except Exception as e:
+        _record_db_error(e)
+        return False, "Could not reach the database. Please try again."
+    if not rows:
+        return False, "No account matches that Aadhaar. Please register first."
+    row = rows[0]
+    st.session_state["auth"] = {"role": role, "id": row.get(id_col), "name": row.get("name")}
+    return True, None
+
+
+def _register(role, aadhaar, fields):
+    if not AADHAAR_RE.match((aadhaar or "").strip()):
+        return False, "Enter a valid 12-digit Aadhaar number."
+    if supabase is None:
+        return False, "The database is not configured. Set SUPABASE_URL and SUPABASE_KEY."
+    table = "farmers" if role == "farmer" else "buyers"
+    id_col = "farmer_id" if role == "farmer" else "buyer_id"
+    set_fn = "set_farmer_aadhaar" if role == "farmer" else "set_buyer_aadhaar"
+    set_arg = "p_farmer_id" if role == "farmer" else "p_buyer_id"
+    try:
+        res = insert_row(table, fields)
+        new_id = res.data[0].get(id_col) if res.data else None
+        if new_id is None:
+            return False, "Registration failed. Please try again."
+        supabase.rpc(set_fn, {set_arg: new_id, "p_aadhaar": aadhaar.strip()}).execute()
+    except Exception as e:
+        _record_db_error(e)
+        return False, f"Could not register: {e}"
+    st.session_state["auth"] = {"role": role, "id": new_id, "name": fields.get("name")}
+    return True, None
+
+
+def render_login_page():
+    _, mid, _ = st.columns([1, 1.25, 1])
+    with mid:
+        st.markdown(
+            '<div class="login-head">'
+            '<span class="login-mark">🌱</span>'
+            "<div>"
+            '<div class="login-brand">AgriConnect</div>'
+            '<div class="login-tag">Sign in to buy &amp; sell produce</div>'
+            "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        role_label = st.radio(
+            "Account type",
+            ["👨‍🌾 Farmer", "🛒 Buyer"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="auth_role",
+        )
+        role = "farmer" if role_label.startswith("👨") else "buyer"
+
+        mode = st.radio(
+            "Mode",
+            ["Log in", "Register"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="auth_mode",
+        )
+
+        if mode == "Log in":
+            with st.form(f"login_{role}"):
+                aadhaar = st.text_input(
+                    "Aadhaar number (12 digits)",
+                    type="password",
+                    max_chars=12,
+                    placeholder="•••• •••• ••••",
+                    key=f"login_aadhaar_{role}",
+                )
+                st.caption(
+                    "Your Aadhaar is used only to sign in and is never shown or stored in plain text."
+                )
+                submitted = st.form_submit_button("Log in", icon=":material/login:")
+                if submitted:
+                    ok, msg = _attempt_login(role, aadhaar)
+                    if ok:
+                        st.session_state["nav"] = "🏠 Home"
+                        st.rerun()
+                    else:
+                        st.error(msg, icon=":material/error:")
+        else:
+            with st.form(f"register_{role}"):
+                if role == "farmer":
+                    name = st.text_input("Full name*", placeholder="Enter your name", max_chars=100)
+                    village = st.text_input("Village / area*", max_chars=100)
+                    contact = st.text_input(
+                        "Phone number*", max_chars=10, placeholder="10-digit mobile number"
+                    )
+                    crop = st.text_input("Primary crop", placeholder="e.g. Wheat", max_chars=40)
+                else:
+                    name = st.text_input(
+                        "Business / name*", placeholder="Enter buyer or business name", max_chars=100
+                    )
+                    buyer_type = st.selectbox("Buyer type*", ["", "Retailer", "Wholesaler", "Consumer"])
+                    location = st.text_input("Location / city*", max_chars=100)
+                    contact = st.text_input(
+                        "Phone number*", max_chars=10, placeholder="10-digit mobile number"
+                    )
+                aadhaar = st.text_input(
+                    "Aadhaar number (12 digits)*",
+                    type="password",
+                    max_chars=12,
+                    placeholder="•••• •••• ••••",
+                )
+                st.caption("Stored only as a one-way hash — never shown or saved in plain text.")
+                submitted = st.form_submit_button("Create account", icon=":material/person_add:")
+
+                if submitted:
+                    errors = []
+                    if not validate_not_empty(name):
+                        errors.append("Name is required.")
+                    if not validate_phone(contact):
+                        errors.append("Phone must be 10 digits starting with 6–9.")
+                    if role == "farmer" and not validate_not_empty(village):
+                        errors.append("Village / area is required.")
+                    if role == "buyer":
+                        if not buyer_type:
+                            errors.append("Please select a buyer type.")
+                        if not validate_not_empty(location):
+                            errors.append("Location is required.")
+                    if not AADHAAR_RE.match((aadhaar or "").strip()):
+                        errors.append("Aadhaar must be exactly 12 digits.")
+                    if errors:
+                        for err in errors:
+                            st.error(err, icon=":material/error:")
+                    else:
+                        if role == "farmer":
+                            fields = {
+                                "name": title_case(name),
+                                "village": title_case(village),
+                                "contact": contact.strip(),
+                                "primary_crop": title_case(crop) or None,
+                            }
+                        else:
+                            fields = {
+                                "name": title_case(name),
+                                "buyer_type": buyer_type.strip().lower(),
+                                "location": title_case(location),
+                                "contact": contact.strip(),
+                            }
+                        ok, msg = _register(role, aadhaar, fields)
+                        if ok:
+                            st.session_state["nav"] = "🏠 Home"
+                            st.rerun()
+                        else:
+                            st.error(msg, icon=":material/error:")
+
+        if _DB_ERROR["message"]:
+            st.warning(
+                "Database unavailable — sign-in will not work until the connection is restored.\n\n"
+                f"`{_DB_ERROR['message']}`",
+                icon=":material/cloud_off:",
+            )
+
+        st.divider()
+        st.button(
+            "Skip — browse as guest",
+            key="skip_login",
+            on_click=_skip_login,
+            icon=":material/visibility:",
+            use_container_width=True,
+        )
+        st.caption(
+            "View listings, reports and every page without an account. "
+            "Signing in is only needed to buy or sell."
+        )
+
+
+if not st.session_state.get("auth"):
+    render_login_page()
+    st.stop()
+
 
 with st.sidebar:
-
     st.markdown(
         """
-        <div style="padding: 20px 0 30px 0; border-bottom: 2px solid var(--agri-border);">
-            <div style="font-size: 40px; margin-bottom: 10px;">🌱</div>
-            <h1 style="margin: 0; font-size: 28px;">AgriConnect</h1>
-            <p style="color: var(--agri-muted); margin-top: 8px; font-size: 14px; font-weight: 600;">
-                Farmer-Buyer Marketplace
-            </p>
+        <div class="brand">
+            <div class="brand-mark">🌱</div>
+            <div>
+                <div class="brand-name">AgriConnect</div>
+                <div class="brand-tag">Farm-to-market marketplace</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("<div style='margin: 24px 0 16px 0;'><p style='font-size: 13px; font-weight: 800; color: var(--agri-green); text-transform: uppercase; letter-spacing: 1.2px; margin: 0;'>Navigation</p></div>", unsafe_allow_html=True)
+    st.markdown('<div class="nav-label">Menu</div>', unsafe_allow_html=True)
+
+    st.session_state.setdefault("nav", "🏠 Home")
 
     page = st.radio(
-        "Go to",
+        "Navigate",
         [
             "🏠 Home",
             "👨‍🌾 Add Farmer",
@@ -650,23 +1690,55 @@ with st.sidebar:
             "📋 Active Listings",
             "📊 Reports",
         ],
+        key="nav",
         label_visibility="collapsed",
     )
 
-    st.markdown("<hr style='margin: 24px 0;'>", unsafe_allow_html=True)
+    auth = st.session_state["auth"]
+    if auth["role"] == "guest":
+        st.markdown(
+            '<div class="whoami">Browsing as <b>Guest</b>'
+            '<span class="whoami-role">Guest</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.button(
+            "Log in",
+            key="guest_login",
+            on_click=_logout,
+            icon=":material/login:",
+            use_container_width=True,
+        )
+    else:
+        st.markdown(
+            f'<div class="whoami">Signed in as <b>{html.escape(str(auth["name"]))}</b>'
+            f'<span class="whoami-role">{auth["role"].title()}</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.button("Log out", key="logout", on_click=_logout, use_container_width=True)
 
-    col_info1, col_info2 = st.columns(2)
-    with col_info1:
-        st.caption("AgriConnect")
-    with col_info2:
-        st.caption("v1.0")
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="creators">
+            <div class="creators-inner">
+                <div class="creators-title">Creators</div>
+                <ul>
+                    <li><span class="avatar">JB</span><span>Joseph Boby</span></li>
+                    <li><span class="avatar">KS</span><span>Kuriakose Sebastion</span></li>
+                    <li><span class="avatar">SS</span><span>Sujith S</span></li>
+                    <li><span class="avatar">NK</span><span>Niranjana S Kummar</span></li>
+                </ul>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    st.caption("🌾 Connect farmers with buyers")
 
+st.button("🏠 Home", key="home_top", on_click=_go_home, help="Go to the home page")
 
-# ============================================================
-# HOME PAGE - ENHANCED
-# ============================================================
+_db_banner = st.empty()
+
 
 if page == "🏠 Home":
 
@@ -675,7 +1747,7 @@ if page == "🏠 Home":
         <div class="hero">
             <div class="hero-title">🌱 Welcome to AgriConnect</div>
             <div class="hero-subtitle">
-                A modern digital marketplace connecting farmers and buyers 
+                A modern digital marketplace connecting farmers and buyers
                 while making agricultural produce easier to manage, discover, and sell.
             </div>
         </div>
@@ -683,10 +1755,7 @@ if page == "🏠 Home":
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        '<div class="section-label">📈 Platform Features</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="section-label">📈 Platform Features</div>', unsafe_allow_html=True)
     st.header("Everything you need in one place", anchor=False)
 
     col1, col2, col3 = st.columns(3, gap="large")
@@ -698,7 +1767,7 @@ if page == "🏠 Home":
                 <div class="feature-icon">👨‍🌾</div>
                 <div class="feature-title">Manage Farmers</div>
                 <div class="feature-text">
-                    Register farmers and maintain their agricultural 
+                    Register farmers and maintain their agricultural
                     profile information with ease.
                 </div>
             </div>
@@ -713,7 +1782,7 @@ if page == "🏠 Home":
                 <div class="feature-icon">🌾</div>
                 <div class="feature-title">List Produce</div>
                 <div class="feature-text">
-                    Add agricultural products with quantity, price, 
+                    Add agricultural products with quantity, price,
                     unit, and harvest date information.
                 </div>
             </div>
@@ -728,7 +1797,7 @@ if page == "🏠 Home":
                 <div class="feature-icon">🤝</div>
                 <div class="feature-title">Connect Buyers</div>
                 <div class="feature-text">
-                    Manage buyers and allow them to place orders 
+                    Manage buyers and allow them to place orders
                     for available produce seamlessly.
                 </div>
             </div>
@@ -736,7 +1805,7 @@ if page == "🏠 Home":
             unsafe_allow_html=True,
         )
 
-    st.markdown("")
+    st.space("small")
 
     col4, col5, col6 = st.columns(3, gap="large")
 
@@ -747,7 +1816,7 @@ if page == "🏠 Home":
                 <div class="feature-icon">📦</div>
                 <div class="feature-title">Manage Orders</div>
                 <div class="feature-text">
-                    Place and track produce orders directly through 
+                    Place and track produce orders directly through
                     the marketplace in real-time.
                 </div>
             </div>
@@ -762,7 +1831,7 @@ if page == "🏠 Home":
                 <div class="feature-icon">📊</div>
                 <div class="feature-title">View Reports</div>
                 <div class="feature-text">
-                    Analyze farmer revenue, buyer activity, pricing trends, 
+                    Analyze farmer revenue, buyer activity, pricing trends,
                     ratings, and payment status.
                 </div>
             </div>
@@ -777,7 +1846,7 @@ if page == "🏠 Home":
                 <div class="feature-icon">💡</div>
                 <div class="feature-title">Smart Insights</div>
                 <div class="feature-text">
-                    Get actionable insights on market trends, 
+                    Get actionable insights on market trends,
                     demand, and pricing opportunities.
                 </div>
             </div>
@@ -785,454 +1854,456 @@ if page == "🏠 Home":
             unsafe_allow_html=True,
         )
 
-    st.markdown("<div style='margin-top: 40px;'></div>", unsafe_allow_html=True)
+    st.space("medium")
+
+    auth = st.session_state["auth"]
+    if auth["role"] == "farmer":
+        st.markdown('<div class="section-label">🏛️ Government schemes</div>', unsafe_allow_html=True)
+        st.header("Subsidies & pensions", anchor=False)
+        schemes = fetch_eq("schemes", "farmer_id", auth["id"], order_by="date_added")
+        if schemes.empty:
+            st.info(
+                "No government schemes are on record for your account yet.",
+                icon=":material/policy:",
+            )
+        else:
+            if "eligible" in schemes.columns:
+                eligible_n = int(schemes["eligible"].fillna(False).astype(bool).sum())
+                s1, s2 = st.columns(2, gap="large")
+                s1.metric("Schemes listed", f"{len(schemes):,}", icon=":material/policy:")
+                s2.metric("You are eligible for", f"{eligible_n:,}", icon=":material/verified:")
+            st.dataframe(
+                schemes.rename(
+                    columns={
+                        "scheme_name": "Scheme",
+                        "eligible": "Eligible",
+                        "date_added": "Date added",
+                    }
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+        st.space("small")
 
     col_info1, col_info2 = st.columns([1, 1], gap="large")
     with col_info1:
-        st.info("📌 **Getting Started**\n\nUse the navigation menu on the left to get started. Start by registering farmers and buyers, then create listings and place orders.")
-    
+        st.info(
+            "📌 **Getting Started**\n\nUse the navigation menu on the left to get started. "
+            "Start by registering farmers and buyers, then create listings and place orders."
+        )
     with col_info2:
-        st.success("✅ **Ready to go**\n\nYour marketplace is fully set up and ready to connect farmers with buyers. Create your first listing today!")
+        st.success(
+            "✅ **Ready to go**\n\nYour marketplace is fully set up and ready to connect "
+            "farmers with buyers. Create your first listing today!"
+        )
 
+    st.space("medium")
+    st.markdown('<div class="section-label">🚀 Quick actions</div>', unsafe_allow_html=True)
+    st.header("Open a page", anchor=False)
+    st.caption("Jump straight to any part of the marketplace.")
 
-# ============================================================
-# ADD FARMER - ENHANCED WITH VALIDATION
-# ============================================================
+    _quick_pages = [
+        "👨‍🌾 Add Farmer",
+        "🛒 Add Buyer",
+        "🌾 Add Listing",
+        "📦 Place Order",
+        "📋 Active Listings",
+        "📊 Reports",
+    ]
+    _qa_cols = st.columns(3, gap="medium")
+    for _i, _target in enumerate(_quick_pages):
+        with _qa_cols[_i % 3]:
+            st.button(
+                _target,
+                key=f"qa_{_i}",
+                on_click=_go_to,
+                args=(_target,),
+                use_container_width=True,
+            )
+
 
 elif page == "👨‍🌾 Add Farmer":
 
-    st.markdown('<div class="section-label">👨‍🌾 Farmer Management</div>', unsafe_allow_html=True)
-    st.header("Register a Farmer", anchor=False)
-    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Add a new farmer and their primary agricultural information to the marketplace.</p>", unsafe_allow_html=True)
+    page_header("Farmer management", "Register a farmer", "Add a farmer and their key details to the marketplace.")
+
+    st.session_state.setdefault("farmer_crop_max", 2)
 
     with st.form("farmer_form", clear_on_submit=True):
-
         col1, col2 = st.columns(2, gap="large")
-
         with col1:
             name = st.text_input(
-                "Full Name*",
+                "Full name*",
                 placeholder="Enter farmer name",
                 max_chars=100,
+                key="farmer_name",
             )
-            st.caption("Required field - letters and spaces only")
-
+            st.caption("Letters and spaces only · auto-capitalized")
         with col2:
             village = st.text_input(
-                "Village / Area*",
-                placeholder="Enter village or area name",
+                "Village / area*",
+                placeholder="Enter village or area",
                 max_chars=100,
+                key="farmer_village",
             )
-            st.caption("Required field")
 
         col3, col4 = st.columns(2, gap="large")
-
         with col3:
-            contact = st.text_input(
-                "Phone Number*",
-                placeholder="Enter 10-digit mobile number",
-                max_chars=10,
+            contact = st.text_input("Phone number*", placeholder="10-digit mobile number", max_chars=10)
+            st.caption("Format: 6–9 followed by 9 digits")
+
+        st.markdown('<div class="section-label">🌾 Primary crops</div>', unsafe_allow_html=True)
+
+        crop_opts, pinned_set, stock_set = ordered_crop_options()
+        fmt = lambda c: crop_option_label(c, pinned_set, stock_set)
+
+        crop_slots = []
+        for i in range(st.session_state["farmer_crop_max"]):
+            st.markdown(
+                f'<div class="crop-label"><span class="crop-slot-index">{i + 1}</span>Crop {i + 1}</div>',
+                unsafe_allow_html=True,
             )
-            st.caption("Format: 10-digit number (6-9...)")
-
-        with col4:
-            crop = st.text_input(
-                "Primary Crop*",
-                placeholder="e.g. Rubber, Coconut, Rice",
-                max_chars=50,
+            choice = st.selectbox(
+                f"Crop {i + 1}",
+                crop_opts,
+                index=None,
+                key=f"farmer_crop_{i}",
+                format_func=fmt,
+                placeholder="— Select crop —",
             )
-            st.caption("Main crop cultivated")
+            custom = ""
+            if choice == ADD_NEW_CROP:
+                custom = st.text_input(
+                    f"New crop {i + 1} name*",
+                    placeholder="e.g. Dragon fruit",
+                    key=f"farmer_new_crop_{i}",
+                )
+            crop_slots.append((choice, custom))
+            st.space("small")
 
-        st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-
-        submitted = st.form_submit_button(
-            "✓ Register Farmer",
-            use_container_width=True,
-        )
+        submitted = st.form_submit_button("Register farmer", icon=":material/person_add:")
 
         if submitted:
-            # Validation
             errors = []
-            
             if not validate_name(name):
-                errors.append("Name must be 2+ letters only")
+                errors.append("Name must be at least 2 letters.")
             if not validate_not_empty(village):
-                errors.append("Village name is required")
+                errors.append("Village / area is required.")
             if not validate_phone(contact):
-                errors.append("Phone must be 10 digits (6-9)")
-            if not validate_not_empty(crop):
-                errors.append("Primary crop is required")
+                errors.append("Phone must be 10 digits starting with 6–9.")
+
+            selected = []
+            for i, (choice, custom) in enumerate(crop_slots):
+                if choice == ADD_NEW_CROP:
+                    if not validate_not_empty(custom):
+                        errors.append(f"Crop {i + 1}: please enter the new crop name.")
+                    else:
+                        selected.append(ensure_crop(custom))
+                elif choice:
+                    selected.append(choice)
+
+            selected = list(dict.fromkeys(selected))
+
+            if not selected:
+                errors.append("Select at least one primary crop.")
+
+            primary_crop = ", ".join(selected)
+            if selected and len(primary_crop) > 50:
+                errors.append(
+                    f"Too many or too-long crop names ({len(primary_crop)}/50 characters). "
+                    "Choose fewer or shorter crops for the farmer profile."
+                )
 
             if errors:
                 for error in errors:
-                    st.error(f"❌ {error}")
+                    st.error(error, icon=":material/error:")
             else:
                 try:
                     insert_row(
                         "farmers",
                         {
-                            "name": name.strip(),
-                            "village": village.strip(),
+                            "name": title_case(name),
+                            "village": title_case(village),
                             "contact": contact.strip(),
-                            "primary_crop": crop.strip(),
+                            "primary_crop": primary_crop,
                         },
                     )
-                    st.success(f"✅ Successfully registered farmer **{name}**!")
+                    st.success(
+                        f"Registered **{title_case(name)}** — growing {primary_crop}.",
+                        icon=":material/check_circle:",
+                    )
                     st.balloons()
                 except Exception as e:
-                    st.error(f"❌ Database error: {str(e)}")
+                    st.error(f"Database error: {e}", icon=":material/error:")
 
+    st.space("small")
 
-# ============================================================
-# ADD BUYER - ENHANCED WITH VALIDATION
-# ============================================================
+    add_crop_col, slot_hint_col = st.columns([1, 2], gap="large")
+    with add_crop_col:
+        st.button(
+            "＋ Add another crop",
+            key="add_farmer_crop",
+            type="secondary",
+            use_container_width=True,
+            disabled=st.session_state["farmer_crop_max"] >= MAX_FARMER_CROPS,
+            on_click=lambda: st.session_state.__setitem__("farmer_crop_max", st.session_state["farmer_crop_max"] + 1),
+        )
+    with slot_hint_col:
+        st.markdown(
+            f'<div class="slot-hint">🌾 Crop slots: <b>{st.session_state["farmer_crop_max"]}</b> / {MAX_FARMER_CROPS}'
+            f" — fields keep their values when you add more.</div>",
+            unsafe_allow_html=True,
+        )
+
 
 elif page == "🛒 Add Buyer":
 
-    st.markdown('<div class="section-label">🛒 Buyer Management</div>', unsafe_allow_html=True)
-    st.header("Register a Buyer", anchor=False)
-    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Add a retailer, wholesaler, or consumer to the marketplace.</p>", unsafe_allow_html=True)
+    page_header("Buyer management", "Register a buyer", "Add a retailer, wholesaler or consumer to the marketplace.")
 
     with st.form("buyer_form", clear_on_submit=True):
-
         col1, col2 = st.columns(2, gap="large")
-
         with col1:
             name = st.text_input(
-                "Business/Name*",
-                placeholder="Enter buyer name or business name",
+                "Business / name*",
+                placeholder="Enter buyer or business name",
                 max_chars=100,
+                key="buyer_name",
             )
-            st.caption("Required field")
-
         with col2:
-            buyer_type = st.selectbox(
-                "Buyer Type*",
-                ["", "Retailer", "Wholesaler", "Consumer"],
-            )
-            if buyer_type:
-                st.caption(f"Selected: {buyer_type}")
-            else:
-                st.caption("Select a category")
+            buyer_type = st.selectbox("Buyer type*", ["", "Retailer", "Wholesaler", "Consumer"])
 
         col3, col4 = st.columns(2, gap="large")
-
         with col3:
             location = st.text_input(
-                "Location/City*",
+                "Location / city*",
                 placeholder="Enter city or location",
                 max_chars=100,
+                key="buyer_location",
             )
-            st.caption("Required field")
-
         with col4:
-            contact = st.text_input(
-                "Phone Number*",
-                placeholder="Enter 10-digit mobile number",
-                max_chars=10,
-            )
-            st.caption("Format: 10-digit number")
+            contact = st.text_input("Phone number*", placeholder="10-digit mobile number", max_chars=10)
 
-        st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-
-        submitted = st.form_submit_button(
-            "✓ Register Buyer",
-            use_container_width=True,
-        )
+        submitted = st.form_submit_button("Register buyer", icon=":material/person_add:")
 
         if submitted:
             errors = []
-            
             if not validate_not_empty(name):
-                errors.append("Buyer name is required")
+                errors.append("Buyer name is required.")
             if not buyer_type:
-                errors.append("Please select a buyer type")
+                errors.append("Please select a buyer type.")
             if not validate_not_empty(location):
-                errors.append("Location is required")
+                errors.append("Location is required.")
             if not validate_phone(contact):
-                errors.append("Phone must be 10 digits")
+                errors.append("Phone must be 10 digits starting with 6–9.")
 
             if errors:
                 for error in errors:
-                    st.error(f"❌ {error}")
+                    st.error(error, icon=":material/error:")
             else:
                 try:
                     insert_row(
                         "buyers",
                         {
-                            "name": name.strip(),
+                            "name": title_case(name),
                             "buyer_type": buyer_type.strip().lower(),
-                            "location": location.strip(),
+                            "location": title_case(location),
                             "contact": contact.strip(),
                         },
                     )
-                    st.success(f"✅ Successfully registered buyer **{name}** as {buyer_type}!")
+                    st.success(f"Registered **{title_case(name)}** as a {buyer_type.lower()}.", icon=":material/check_circle:")
                     st.balloons()
                 except Exception as e:
-                    st.error(f"❌ Database error: {str(e)}")
+                    st.error(f"Database error: {e}", icon=":material/error:")
 
-
-
-# ============================================================
-# ADD LISTING - ENHANCED WITH VALIDATION
-# ============================================================
 
 elif page == "🌾 Add Listing":
 
-    st.markdown('<div class="section-label">🌾 Marketplace</div>', unsafe_allow_html=True)
-    st.header("List Your Produce", anchor=False)
-    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Add agricultural products to the marketplace with pricing and availability information.</p>", unsafe_allow_html=True)
+    page_header("Marketplace", "List your produce", "Describe what is ready to sell with pricing and availability.")
 
-    farmers = fetch_all(
-        "farmers", "farmer_id, name", order_by="name"
-    )
+    farmers = fetch_all("farmers", "farmer_id, name", order_by="name")
 
     if farmers.empty:
-        st.warning("⚠️ No farmers found. Please register a farmer first before listing produce.", icon="⚠️")
-        st.info("Click on '👨‍🌾 Add Farmer' in the sidebar to get started.")
+        st.info("No farmers yet. Register a farmer first to create a listing.", icon=":material/person_add:")
 
     else:
+        render_crop_pinner()
 
         with st.form("listing_form", clear_on_submit=True):
-
             col1, col2 = st.columns(2, gap="large")
-
             with col1:
-                farmer = st.selectbox(
-                    "Select Farmer*",
-                    farmers["name"],
-                )
-                st.caption("Required field")
-
+                farmer = st.selectbox("Farmer*", farmers["name"])
             with col2:
-                crop_name = st.text_input(
-                    "Product Name*",
-                    placeholder="e.g. Rubber Sheet, Premium Rice",
-                    max_chars=100,
+                crop_opts, pinned_set, stock_set = ordered_crop_options()
+                crop_choice = st.selectbox(
+                    "Produce*",
+                    crop_opts,
+                    format_func=lambda c: crop_option_label(c, pinned_set, stock_set),
                 )
-                st.caption("Product name or variety")
+                crop_custom = ""
+                if crop_choice == ADD_NEW_CROP:
+                    crop_custom = st.text_input(
+                        "New produce name*",
+                        placeholder="e.g. Dragon fruit",
+                        key="listing_new_crop",
+                    )
 
             col3, col4 = st.columns(2, gap="large")
-
             with col3:
-                quantity = st.number_input(
-                    "Quantity Available*",
-                    min_value=0.1,
-                    step=0.5,
-                    format="%.2f",
-                )
-                st.caption("Amount in selected units")
-
+                quantity = st.number_input("Quantity*", min_value=0.1, step=0.5, format="%.2f")
             with col4:
-                unit = st.selectbox(
-                    "Unit of Measurement*",
-                    ["kg", "tons", "liters", "quintal", "bag", "box", "piece"],
-                )
-                st.caption("Unit type")
+                unit = st.selectbox("Unit*", ["kg", "tons", "liters", "quintal", "bag", "box", "piece"])
 
             col5, col6 = st.columns(2, gap="large")
-
             with col5:
-                price = st.number_input(
-                    "Price per Unit (₹)*",
-                    min_value=0.0,
-                    step=10.0,
-                    format="%.2f",
-                )
-                st.caption("Price in rupees")
-
+                price = st.number_input("Price per unit (₹)*", min_value=0.0, step=10.0, format="%.2f")
             with col6:
-                harvest_date = st.date_input(
-                    "Harvest Date*",
-                )
-                st.caption("Date of harvest")
+                harvest_date = st.date_input("Harvest date*")
 
-            # Summary
-            st.markdown("<div style='margin: 20px 0; padding: 16px; background: var(--agri-green-light); border-radius: 12px;'>", unsafe_allow_html=True)
-            col_sum1, col_sum2 = st.columns(2, gap="large")
-            with col_sum1:
-                st.metric("Total Value (₹)", f"₹ {quantity * price:,.2f}")
-            with col_sum2:
-                st.metric("Units", f"{quantity} {unit}")
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True, key="agri_glass_a"):
+                sum1, sum2 = st.columns(2, gap="large")
+                sum1.metric("Estimated value", f"₹ {quantity * price:,.2f}")
+                sum2.metric("Quantity", f"{quantity:g} {unit}")
 
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-
-            submitted = st.form_submit_button(
-                "✓ Create Listing",
-                use_container_width=True,
-            )
-
-            farmer_id = int(
-                farmers.loc[
-                    farmers["name"] == farmer,
-                    "farmer_id"
-                ].iloc[0]
-            )
+            submitted = st.form_submit_button("Create listing", icon=":material/add_circle:")
 
             if submitted:
                 errors = []
-                
-                if not validate_not_empty(crop_name):
-                    errors.append("Product name is required")
+                crop_name = crop_custom if crop_choice == ADD_NEW_CROP else crop_choice
+                if crop_choice == ADD_NEW_CROP and not validate_not_empty(crop_custom):
+                    errors.append("Please enter the new produce name.")
+                elif not validate_not_empty(crop_name):
+                    errors.append("Produce name is required.")
                 if quantity <= 0:
-                    errors.append("Quantity must be greater than 0")
+                    errors.append("Quantity must be greater than 0.")
                 if price <= 0:
-                    errors.append("Price must be greater than 0")
+                    errors.append("Price must be greater than 0.")
 
                 if errors:
                     for error in errors:
-                        st.error(f"❌ {error}")
+                        st.error(error, icon=":material/error:")
                 else:
+                    if crop_choice == ADD_NEW_CROP:
+                        crop_name = ensure_crop(crop_custom)
                     try:
+                        farmer_id = int(farmers.loc[farmers["name"] == farmer, "farmer_id"].iloc[0])
                         insert_row(
                             "listings",
                             {
                                 "farmer_id": farmer_id,
-                                "crop_name": crop_name.strip(),
+                                "crop_name": crop_name,
                                 "quantity": quantity,
                                 "unit": unit,
                                 "price_per_unit": price,
                                 "harvest_date": str(harvest_date),
                             },
                         )
-                        st.success(f"✅ Successfully listed **{crop_name}** ({quantity} {unit}) for ₹{price}!")
+                        st.success(
+                            f"Listed **{crop_name}** ({quantity:g} {unit}) at ₹{price:,.2f}.",
+                            icon=":material/check_circle:",
+                        )
                         st.balloons()
                     except Exception as e:
-                        st.error(f"❌ Database error: {str(e)}")
+                        st.error(f"Database error: {e}", icon=":material/error:")
 
-
-# ============================================================
-# PLACE ORDER - ENHANCED
-# ============================================================
 
 elif page == "📦 Place Order":
 
-    st.markdown('<div class="section-label">📦 Orders</div>', unsafe_allow_html=True)
-    st.header("Place an Order", anchor=False)
-    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Create a new order for available produce.</p>", unsafe_allow_html=True)
+    page_header("Orders", "Place an order", "Pick a buyer and an active listing to create an order.")
 
-    buyers = fetch_all(
-        "buyers", "buyer_id, name", order_by="name"
-    )
-
+    buyers = fetch_all("buyers", "buyer_id, name", order_by="name")
     listings = fetch_all(
         "active_listings_view",
         "listing_id, farmer_name, crop_name, quantity, price_per_unit, unit",
         order_by="farmer_name",
     )
 
+    if not listings.empty and "quantity" in listings.columns:
+        listings["quantity"] = pd.to_numeric(listings["quantity"], errors="coerce")
+        listings = listings[listings["quantity"] > 0].reset_index(drop=True)
+
     if buyers.empty or listings.empty:
-        col_warn1, col_warn2 = st.columns(2)
-        with col_warn1:
-            st.warning("⚠️ No buyers registered yet.", icon="⚠️")
-            st.info("Add a buyer to place orders.")
-        with col_warn2:
-            st.warning("⚠️ No available listings yet.", icon="⚠️")
-            st.info("Create a listing first.")
-
+        if buyers.empty:
+            st.warning("No buyers registered yet. Add a buyer first.", icon=":material/person_add:")
+        if listings.empty:
+            st.warning("No active listings yet. Create a listing first.", icon=":material/add_circle:")
     else:
+        pinned = [str(c).strip() for c in st.session_state.get("pinned_crops", [])]
 
-        listings["label"] = (
-            listings["farmer_name"]
-            + " — "
-            + listings["crop_name"]
-            + " ("
-            + listings["quantity"].astype(str)
-            + " " 
-            + listings["unit"]
-            + " available @ ₹"
-            + listings["price_per_unit"].astype(str)
-            + ")"
-        )
+        if pinned and not listings.empty:
+            listings["_pinned"] = listings["crop_name"].isin(pinned).astype(int)
+            listings = (
+                listings.sort_values(["_pinned", "farmer_name"])
+                .drop(columns="_pinned")
+                .reset_index(drop=True)
+            )
+
+        def listing_label(row):
+            mark = "📌 " if row["crop_name"] in pinned else ""
+            return (
+                mark
+                + row["farmer_name"]
+                + " — "
+                + row["crop_name"]
+                + " ("
+                + str(row["quantity"])
+                + " "
+                + row["unit"]
+                + " @ ₹"
+                + str(row["price_per_unit"])
+                + ")"
+            )
+
+        listings["label"] = listings.apply(listing_label, axis=1)
 
         with st.form("order_form", clear_on_submit=True):
-
             col1, col2 = st.columns(2, gap="large")
-
             with col1:
-                buyer = st.selectbox(
-                    "Select Buyer*",
-                    buyers["name"],
-                )
-                st.caption("Required field")
-
-                buyer_id = int(
-                    buyers.loc[
-                        buyers["name"] == buyer,
-                        "buyer_id"
-                    ].iloc[0]
-                )
-
+                buyer = st.selectbox("Buyer*", buyers["name"])
+                buyer_id = int(buyers.loc[buyers["name"] == buyer, "buyer_id"].iloc[0])
             with col2:
-                listing_label = st.selectbox(
-                    "Select Listing*",
-                    listings["label"],
-                )
-                st.caption("Available produce")
-
-                listing_row = listings.loc[
-                    listings["label"] == listing_label
-                ].iloc[0]
-
-                listing_id = int(
-                    listing_row["listing_id"]
-                )
-
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                listing_pick = st.selectbox("Listing*", listings["label"])
+                listing_row = listings.loc[listings["label"] == listing_pick].iloc[0]
+                listing_id = int(listing_row["listing_id"])
 
             col3, col4 = st.columns(2, gap="large")
-
             with col3:
+                max_qty = float(listing_row["quantity"])
                 qty = st.number_input(
-                    "Quantity to Order*",
-                    min_value=0.1,
-                    max_value=float(
-                        listing_row["quantity"]
-                    ),
+                    "Quantity*",
+                    min_value=min(0.1, max_qty),
+                    max_value=max_qty,
                     step=0.5,
                     format="%.2f",
                 )
-                st.caption(f"Max: {listing_row['quantity']} {listing_row['unit']}")
-
+                st.caption(f"Max {listing_row['quantity']} {listing_row['unit']}")
             with col4:
-                total_price = qty * listing_row['price_per_unit']
-                st.metric(
-                    "Order Total (₹)",
-                    f"₹ {total_price:,.2f}",
-                )
+                total_price = qty * listing_row["price_per_unit"]
+                st.metric("Order total", f"₹ {total_price:,.2f}")
                 st.caption(f"@ ₹{listing_row['price_per_unit']}/unit")
 
-            # Order Summary
-            st.markdown("<div style='margin: 20px 0; padding: 16px; background: var(--agri-green-light); border-radius: 12px;'>", unsafe_allow_html=True)
-            st.markdown(f"""
-            **Order Summary**
-            - Buyer: **{buyer}**
-            - Product: **{listing_row['crop_name']}** (from {listing_row['farmer_name']})
-            - Quantity: **{qty} {listing_row['unit']}**
-            - Price/Unit: **₹{listing_row['price_per_unit']}**
-            - **Total: ₹{total_price:,.2f}**
-            """)
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True, key="agri_glass_b"):
+                st.markdown(
+                    f"""
+                    **Order summary**
 
-            st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+                    - Buyer: {buyer}
+                    - Produce: {listing_row['crop_name']} from {listing_row['farmer_name']}
+                    - Quantity: {qty:g} {listing_row['unit']}
+                    - Total: ₹{total_price:,.2f}
+                    """
+                )
 
-            submitted = st.form_submit_button(
-                "✓ Place Order",
-                use_container_width=True,
-            )
+            submitted = st.form_submit_button("Place order", icon=":material/shopping_cart_checkout:")
 
             if submitted:
                 errors = []
-                
                 if qty <= 0:
-                    errors.append("Order quantity must be greater than 0")
+                    errors.append("Order quantity must be greater than 0.")
                 if qty > float(listing_row["quantity"]):
-                    errors.append(f"Insufficient stock. Maximum: {listing_row['quantity']} {listing_row['unit']}")
+                    errors.append(f"Insufficient stock. Maximum is {listing_row['quantity']} {listing_row['unit']}.")
 
                 if errors:
                     for error in errors:
-                        st.error(f"❌ {error}")
+                        st.error(error, icon=":material/error:")
                 else:
                     try:
                         insert_row(
@@ -1243,325 +2314,191 @@ elif page == "📦 Place Order":
                                 "quantity_ordered": qty,
                             },
                         )
-                        st.success(f"✅ Order placed successfully! ₹{total_price:,.2f} order created.")
+                        st.success(f"Order placed — ₹{total_price:,.2f}.", icon=":material/check_circle:")
                         st.balloons()
                     except Exception as e:
-                        st.error(f"❌ Database error: {str(e)}")
+                        st.error(f"Database error: {e}", icon=":material/error:")
 
-
-# ============================================================
-# ACTIVE LISTINGS - ENHANCED
-# ============================================================
 
 elif page == "📋 Active Listings":
 
-    st.markdown('<div class="section-label">📋 Marketplace</div>', unsafe_allow_html=True)
-    st.header("Active Listings", anchor=False)
-    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>Browse all currently available produce listings.</p>", unsafe_allow_html=True)
+    page_header("Marketplace", "Active listings", "Browse everything currently available from farmers.")
 
-    listings = fetch_all(
-        "active_listings_view", "*", order_by="harvest_date"
-    )
+    listings = fetch_all("active_listings_view", "*", order_by="harvest_date")
 
     if listings.empty:
-        st.info("📭 There are currently no active listings. Check back soon!")
-
+        st.info("No active listings right now. Check back soon.", icon=":material/inventory_2:")
     else:
-        # Stats
-        col_stat1, col_stat2, col_stat3 = st.columns(3, gap="large")
-        
-        with col_stat1:
-            st.metric("Total Listings", len(listings))
-        
-        with col_stat2:
-            total_qty = listings.get("quantity", pd.Series()).sum()
-            st.metric("Total Quantity", f"{total_qty:,.1f}")
-        
-        with col_stat3:
-            unique_farmers = listings.get("farmer_name", pd.Series()).nunique() if "farmer_name" in listings.columns else 0
-            st.metric("Active Farmers", unique_farmers)
+        pinned = [str(c).strip() for c in st.session_state.get("pinned_crops", [])]
+        if pinned:
+            listings["_pinned"] = listings["crop_name"].isin(pinned).astype(int)
+            listings = (
+                listings.sort_values(["_pinned", "harvest_date"], ascending=[False, True])
+                .drop(columns="_pinned")
+                .reset_index(drop=True)
+            )
 
-        st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+        total_qty = listings["quantity"].sum() if "quantity" in listings.columns else 0
+        farmers_count = listings["farmer_name"].nunique() if "farmer_name" in listings.columns else 0
+
+        stat1, stat2, stat3 = st.columns(3, gap="large")
+        stat1.metric("Listings", f"{len(listings):,}", icon=":material/inventory_2:")
+        stat2.metric("Total quantity", f"{total_qty:,.1f}", icon=":material/scale:")
+        stat3.metric("Farmers", f"{farmers_count:,}", icon=":material/agriculture:")
 
         st.dataframe(
             listings,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
-                "price_per_unit": st.column_config.NumberColumn(
-                    label="Price (₹)",
-                    format="₹%,.2f"
-                ),
-            }
+                "price_per_unit": st.column_config.NumberColumn(label="Price (₹)", format="₹%.2f"),
+            },
         )
 
 
-# ============================================================
-# REPORTS
-# ============================================================
-
 elif page == "📊 Reports":
 
-    st.markdown('<div class="section-label">📊 Analytics</div>', unsafe_allow_html=True)
-    st.header("Reports & Analytics", anchor=False)
-    st.markdown("<p style='color: var(--agri-muted); margin-bottom: 24px;'>View comprehensive insights and analytics about your marketplace activity.</p>", unsafe_allow_html=True)
+    page_header("Analytics", "Reports", "Insights into revenue, buyers, pricing, ratings and payments.")
 
     report = st.selectbox(
         "Choose a report",
         [
-            "📈 Revenue per Farmer",
-            "🏆 Most Active Buyers",
-            "💹 Price Trend",
-            "📦 Unsold Stock (15+ days)",
-            "⭐ Average Farmer Rating",
-            "💰 Pending Payments",
+            "📈 Revenue per farmer",
+            "🏆 Most active buyers",
+            "💹 Price trend",
+            "📦 Unsold stock (15+ days)",
+            "⭐ Average farmer rating",
+            "💰 Pending payments",
         ],
     )
 
-    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+    st.space("small")
 
+    if report == "📈 Revenue per farmer":
 
-    # --------------------------------------------------------
-    # Revenue per farmer
-    # --------------------------------------------------------
-
-    if report == "📈 Revenue per Farmer":
-
-        farmers = fetch_all(
-            "farmers", "farmer_id, name", order_by="name"
-        )
+        farmers = fetch_all("farmers", "farmer_id, name", order_by="name")
 
         if farmers.empty:
-            st.info("📭 No farmers available.")
+            st.info("No farmers available.", icon=":material/agriculture:")
         else:
-            farmer = st.selectbox(
-                "Select Farmer",
-                farmers["name"],
-            )
-            st.caption("Choose a farmer to view their revenue details")
-
-            farmer_id = int(
-                farmers.loc[
-                    farmers["name"] == farmer,
-                    "farmer_id"
-                ].iloc[0]
-            )
+            farmer = st.selectbox("Select farmer", farmers["name"])
+            farmer_id = int(farmers.loc[farmers["name"] == farmer, "farmer_id"].iloc[0])
 
             try:
-                revenue_data = supabase.rpc(
-                    "get_farmer_revenue", {"p_farmer_id": farmer_id}
-                ).execute().data
-                revenue_df = to_df(revenue_data)
-                
+                revenue_df = to_df(supabase.rpc("get_farmer_revenue", {"p_farmer_id": farmer_id}).execute().data)
+
                 if revenue_df.empty:
-                    st.info(f"✅ {farmer} has no revenue yet.")
+                    st.info(f"{farmer} has no revenue yet.", icon=":material/payments:")
                 else:
-                    col_rev1, col_rev2 = st.columns(2, gap="large")
-                    with col_rev1:
-                        total = revenue_df.get("total_revenue", pd.Series([0])).sum() if "total_revenue" in revenue_df.columns else 0
-                        st.metric("Total Revenue (₹)", f"₹ {total:,.2f}")
-                    with col_rev2:
-                        st.metric("Transactions", len(revenue_df))
-                    
-                    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-                    st.dataframe(
-                        revenue_df,
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+                    total = revenue_df["total_revenue"].sum() if "total_revenue" in revenue_df.columns else 0
+                    rev1, rev2 = st.columns(2, gap="large")
+                    rev1.metric("Total revenue (₹)", f"₹ {total:,.2f}", icon=":material/payments:")
+                    rev2.metric("Transactions", f"{len(revenue_df):,}", icon=":material/receipt_long:")
+                    st.dataframe(revenue_df, width="stretch", hide_index=True)
             except Exception as e:
-                st.warning(f"⚠️ Could not load revenue data: {str(e)}")
+                st.warning(f"Could not load revenue data: {e}", icon=":material/warning:")
 
-
-    # --------------------------------------------------------
-    # Most active buyers
-    # --------------------------------------------------------
-
-    elif report == "🏆 Most Active Buyers":
+    elif report == "🏆 Most active buyers":
 
         try:
-            buyers_data = supabase.rpc(
-                "get_most_active_buyers"
-            ).execute().data
-            buyers_df = to_df(buyers_data)
-            
+            buyers_df = to_df(supabase.rpc("get_most_active_buyers").execute().data)
+
             if buyers_df.empty:
-                st.info("📭 No buyer activity yet.")
+                st.info("No buyer activity yet.", icon=":material/storefront:")
             else:
-                col_buy1, col_buy2, col_buy3 = st.columns(3, gap="large")
-                with col_buy1:
-                    top_buyer = buyers_df.iloc[0]["name"] if len(buyers_df) > 0 else "—"
-                    st.metric("Top Buyer", top_buyer)
-                with col_buy2:
-                    st.metric("Total Active Buyers", len(buyers_df))
-                with col_buy3:
-                    avg_orders = buyers_df["total_orders"].mean() if "total_orders" in buyers_df.columns else 0
-                    st.metric("Avg Orders/Buyer", f"{avg_orders:.1f}")
-                
-                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-                st.dataframe(
-                    buyers_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                top_buyer = buyers_df.iloc[0]["name"] if len(buyers_df) > 0 else "—"
+                avg_orders = buyers_df["total_orders"].mean() if "total_orders" in buyers_df.columns else 0
+
+                buy1, buy2, buy3 = st.columns(3, gap="large")
+                buy1.metric("Top buyer", top_buyer, icon=":material/emoji_events:")
+                buy2.metric("Active buyers", f"{len(buyers_df):,}", icon=":material/groups:")
+                buy3.metric("Avg orders / buyer", f"{avg_orders:.1f}", icon=":material/receipt_long:")
+                st.dataframe(buyers_df, width="stretch", hide_index=True)
         except Exception as e:
-            st.warning(f"⚠️ Could not load buyer data: {str(e)}")
+            st.warning(f"Could not load buyer data: {e}", icon=":material/warning:")
 
+    elif report == "💹 Price trend":
 
-    # --------------------------------------------------------
-    # Price trend
-    # --------------------------------------------------------
-
-    elif report == "💹 Price Trend":
-
-        crop = st.text_input(
-            "Crop Name",
-            value="Rubber Sheet",
-            placeholder="e.g., Rice, Wheat, Rubber Sheet",
-        )
-        st.caption("Enter the crop name to view price history")
+        crop = st.text_input("Crop name", value="Rubber Sheet", placeholder="e.g. Rice, Wheat, Rubber Sheet")
 
         try:
-            price_data = fetch_eq(
-                "price_history",
-                "crop_name",
-                crop,
-                "*",
-                order_by="record_date",
-            )
-            
+            price_data = fetch_eq("price_history", "crop_name", crop, "*", order_by="record_date")
+
             if price_data.empty:
-                st.warning(f"⚠️ No price history found for '{crop}'.")
+                st.warning(f"No price history found for '{crop}'.", icon=":material/warning:")
             else:
                 if "avg_market_price" in price_data.columns:
                     current_price = price_data.iloc[-1]["avg_market_price"]
                     min_price = price_data["avg_market_price"].min()
                     max_price = price_data["avg_market_price"].max()
-                    
-                    col_price1, col_price2, col_price3 = st.columns(3, gap="large")
-                    with col_price1:
-                        st.metric("Current Price (₹)", f"₹ {current_price:,.2f}")
-                    with col_price2:
-                        st.metric("Min Price (₹)", f"₹ {min_price:,.2f}")
-                    with col_price3:
-                        st.metric("Max Price (₹)", f"₹ {max_price:,.2f}")
-                    
-                    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-                
-                st.dataframe(
-                    price_data,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+
+                    p1, p2, p3 = st.columns(3, gap="large")
+                    p1.metric("Current price (₹)", f"₹ {current_price:,.2f}", icon=":material/sell:")
+                    p2.metric("Min price (₹)", f"₹ {min_price:,.2f}", icon=":material/trending_down:")
+                    p3.metric("Max price (₹)", f"₹ {max_price:,.2f}", icon=":material/trending_up:")
+
+                st.dataframe(price_data, width="stretch", hide_index=True)
         except Exception as e:
-            st.warning(f"⚠️ Could not load price data: {str(e)}")
+            st.warning(f"Could not load price data: {e}", icon=":material/warning:")
 
-
-    # --------------------------------------------------------
-    # Unsold stock
-    # --------------------------------------------------------
-
-    elif report == "📦 Unsold Stock (15+ days)":
+    elif report == "📦 Unsold stock (15+ days)":
 
         try:
-            unsold_data = fetch_eq(
-                "listings",
-                "status",
-                "available",
-                "*",
-            )
-            
-            if unsold_data.empty:
-                st.success("✅ No old unsold stock found!")
+            unsold = fetch_all("unsold_stock_view", "*", order_by="harvest_date")
+
+            if unsold.empty:
+                st.success("No old unsold stock found.", icon=":material/check_circle:")
             else:
-                col_unsold1, col_unsold2 = st.columns(2, gap="large")
-                with col_unsold1:
-                    st.metric("Unsold Items", len(unsold_data))
-                with col_unsold2:
-                    total_qty = unsold_data.get("quantity", pd.Series()).sum() if "quantity" in unsold_data.columns else 0
-                    st.metric("Total Quantity", f"{total_qty:,.1f}")
-                
-                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-                st.warning("⚠️ These items have been unsold for more than 15 days.", icon="⚠️")
-                
-                st.dataframe(
-                    unsold_data,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                total_qty = unsold["quantity"].sum() if "quantity" in unsold.columns else 0
+                u1, u2 = st.columns(2, gap="large")
+                u1.metric("Unsold items", f"{len(unsold):,}", icon=":material/inventory:")
+                u2.metric("Total quantity", f"{total_qty:,.1f}", icon=":material/scale:")
+                st.warning("These items have been unsold for more than 15 days.", icon=":material/schedule:")
+                st.dataframe(unsold, width="stretch", hide_index=True)
         except Exception as e:
-            st.warning(f"⚠️ Could not load unsold stock data: {str(e)}")
+            st.warning(f"Could not load unsold stock data: {e}", icon=":material/warning:")
 
-
-    # --------------------------------------------------------
-    # Average farmer rating
-    # --------------------------------------------------------
-
-    elif report == "⭐ Average Farmer Rating":
+    elif report == "⭐ Average farmer rating":
 
         try:
-            rating_data = supabase.rpc(
-                "get_farmer_ratings"
-            ).execute().data
-            rating_df = to_df(rating_data)
-            
+            rating_df = to_df(supabase.rpc("get_farmer_ratings").execute().data)
+
             if rating_df.empty:
-                st.info("📭 No ratings available yet.")
+                st.info("No ratings available yet.", icon=":material/star:")
             else:
                 if "avg_rating" in rating_df.columns:
                     top_rating = rating_df.iloc[0]["avg_rating"] if len(rating_df) > 0 else 0
-                    avg_rating_overall = rating_df["avg_rating"].mean()
-                    
-                    col_rating1, col_rating2 = st.columns(2, gap="large")
-                    with col_rating1:
-                        st.metric("Highest Rating", f"⭐ {top_rating:.2f}")
-                    with col_rating2:
-                        st.metric("Avg Rating Overall", f"⭐ {avg_rating_overall:.2f}")
-                    
-                    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-                
-                st.dataframe(
-                    rating_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                    overall = rating_df["avg_rating"].mean()
+                    r1, r2 = st.columns(2, gap="large")
+                    r1.metric("Highest rating", f"⭐ {top_rating:.2f}", icon=":material/star:")
+                    r2.metric("Average rating", f"⭐ {overall:.2f}", icon=":material/star_half:")
+                st.dataframe(rating_df, width="stretch", hide_index=True)
         except Exception as e:
-            st.warning(f"⚠️ Could not load rating data: {str(e)}")
+            st.warning(f"Could not load rating data: {e}", icon=":material/warning:")
 
-
-    # --------------------------------------------------------
-    # Pending payments
-    # --------------------------------------------------------
-
-    elif report == "💰 Pending Payments":
+    elif report == "💰 Pending payments":
 
         try:
-            payment_data = fetch_eq(
-                "payments",
-                "status",
-                "pending",
-                "*",
-            )
-            
-            if payment_data.empty:
-                st.success("✅ No pending payments!")
+            payments = fetch_all("pending_payments_view", "*")
+
+            if payments.empty:
+                st.success("No pending payments.", icon=":material/check_circle:")
             else:
-                pending_count = len(payment_data)
-                total_pending = payment_data.get("amount", pd.Series()).sum() if "amount" in payment_data.columns else 0
-                
-                col_pay1, col_pay2 = st.columns(2, gap="large")
-                with col_pay1:
-                    st.metric("Pending Payments", pending_count)
-                with col_pay2:
-                    st.metric("Total Amount (₹)", f"₹ {total_pending:,.2f}")
-                
-                st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
-                st.warning(f"⚠️ {pending_count} payment(s) pending collection.", icon="⚠️")
-                
-                st.dataframe(
-                    payment_data,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                total_pending = payments["amount"].sum() if "amount" in payments.columns else 0
+                pay1, pay2 = st.columns(2, gap="large")
+                pay1.metric("Pending payments", f"{len(payments):,}", icon=":material/pending_actions:")
+                pay2.metric("Total amount (₹)", f"₹ {total_pending:,.2f}", icon=":material/account_balance_wallet:")
+                st.warning(f"{len(payments)} payment(s) pending collection.", icon=":material/schedule:")
+                st.dataframe(payments, width="stretch", hide_index=True)
         except Exception as e:
-            st.warning(f"⚠️ Could not load payment data: {str(e)}")
+            st.warning(f"Could not load payment data: {e}", icon=":material/warning:")
+
+
+if _DB_ERROR["message"]:
+    _db_banner.error(
+        "**Database unavailable** — the app could not reach Supabase, so lists and "
+        "reports below may appear empty. Check your network connection and that the "
+        "Supabase project is online.\n\n"
+        f"`{_DB_ERROR['message']}`",
+        icon=":material/cloud_off:",
+    )
