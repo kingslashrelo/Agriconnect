@@ -1585,8 +1585,7 @@ def render_login_page():
                     location = st.text_input("Location / city*", max_chars=100)
                     contact = st.text_input(
                         "Phone number*", max_chars=10, placeholder="10-digit mobile number"
-                    )
-                aadhaar = st.text_input(
+                                    aadhaar = st.text_input(
                     "Aadhaar number (12 digits)*",
                     type="password",
                     max_chars=12,
