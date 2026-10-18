@@ -2915,18 +2915,22 @@ elif page == "🌾 Add Listing":
 
     page_header("Marketplace", "List your produce", "Describe what is ready to sell with pricing and availability.")
 
-    farmers = fetch_all("farmers", "farmer_id, name", order_by="name")
+    auth = st.session_state["auth"]
 
-    if farmers.empty:
-        st.info("No farmers yet. Register one from the sign-in screen to create a listing.", icon=":material/person_add:")
-
+    if auth["role"] != "farmer":
+        st.warning(
+            "Sign in with a farmer account to create listings.",
+            icon=":material/account_circle:",
+        )
     else:
+        farmer_id = int(auth["id"])
         render_crop_pinner()
 
         with st.form("listing_form", clear_on_submit=True):
             col1, col2 = st.columns(2, gap="large")
             with col1:
-                farmer = st.selectbox("Farmer*", farmers["name"])
+                st.markdown("**Farmer**")
+                st.info(f"👨‍🌾 {auth['name']} (your account)", icon=":material/account_circle:")
             with col2:
                 crop_opts, pinned_set, stock_set = ordered_crop_options()
                 crop_choice = st.selectbox(
@@ -2980,7 +2984,6 @@ elif page == "🌾 Add Listing":
                     if crop_choice == ADD_NEW_CROP:
                         crop_name = ensure_crop(crop_custom)
                     try:
-                        farmer_id = int(farmers.loc[farmers["name"] == farmer, "farmer_id"].iloc[0])
                         insert_row(
                             "listings",
                             {
@@ -3003,9 +3006,13 @@ elif page == "🌾 Add Listing":
 
 elif page == "📦 Place Order":
 
-    page_header("Orders", "Place an order", "Pick a buyer and an active listing to create an order.")
+    page_header(
+        "Orders",
+        "Place an order",
+        "Order from an active listing — it will be placed on your account.",
+    )
 
-    buyers = fetch_all("buyers", "buyer_id, name", order_by="name")
+    auth = st.session_state["auth"]
     listings = fetch_all(
         "active_listings_view",
         "listing_id, farmer_name, crop_name, quantity, price_per_unit, unit",
@@ -3016,11 +3023,13 @@ elif page == "📦 Place Order":
         listings["quantity"] = pd.to_numeric(listings["quantity"], errors="coerce")
         listings = listings[listings["quantity"] > 0].reset_index(drop=True)
 
-    if buyers.empty or listings.empty:
-        if buyers.empty:
-            st.warning("No buyers registered yet. Register one from the sign-in screen.", icon=":material/person_add:")
-        if listings.empty:
-            st.warning("No active listings yet. Create a listing first.", icon=":material/add_circle:")
+    if auth["role"] != "buyer":
+        st.warning(
+            "Sign in with a buyer account to place orders.",
+            icon=":material/account_circle:",
+        )
+    elif listings.empty:
+        st.warning("No active listings yet. Create a listing first.", icon=":material/add_circle:")
     else:
         pinned = [str(c).strip() for c in st.session_state.get("pinned_crops", [])]
 
@@ -3053,8 +3062,9 @@ elif page == "📦 Place Order":
         with st.form("order_form", clear_on_submit=True):
             col1, col2 = st.columns(2, gap="large")
             with col1:
-                buyer = st.selectbox("Buyer*", buyers["name"])
-                buyer_id = int(buyers.loc[buyers["name"] == buyer, "buyer_id"].iloc[0])
+                buyer_id = int(auth["id"])
+                st.markdown("**Buyer**")
+                st.info(f"🛒 {auth['name']} (your account)", icon=":material/account_circle:")
             with col2:
                 listing_pick = st.selectbox("Listing*", listings["label"])
                 listing_row = listings.loc[listings["label"] == listing_pick].iloc[0]
@@ -3081,7 +3091,7 @@ elif page == "📦 Place Order":
                     f"""
                     **Order summary**
 
-                    - Buyer: {buyer}
+                    - Buyer: {auth['name']} (you)
                     - Produce: {listing_row['crop_name']} from {listing_row['farmer_name']}
                     - Quantity: {qty:g} {listing_row['unit']}
                     - Total: ₹{total_price:,.2f}
@@ -3110,7 +3120,10 @@ elif page == "📦 Place Order":
                                 "quantity_ordered": qty,
                             },
                         )
-                        st.success(f"Order placed — ₹{total_price:,.2f}.", icon=":material/check_circle:")
+                        st.success(
+                            f"Order placed for {auth['name']} — ₹{total_price:,.2f}.",
+                            icon=":material/check_circle:",
+                        )
                         st.balloons()
                     except Exception as e:
                         st.error(f"Database error: {e}", icon=":material/error:")
