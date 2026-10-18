@@ -420,59 +420,62 @@ def render_crop_advisor(landing=False):
         f"P {query.get('p', '—')} · K {query.get('k', '—')} · {query.get('temp', '—')}°C"
     )
 
-    for i, row in enumerate(results):
-        crop = str(row.get("crop_name", "")).strip()
-        match_pct = row.get("match_pct", 0)
-        revenue = row.get("revenue", "—")
-        outlook = row.get("market_outlook", "—")
-        with st.container(border=True, key=f"advisor_card_{i}"):
-            top_l, top_r = st.columns([4, 1])
-            with top_l:
-                st.subheader(f"🌾 {crop}", anchor=False)
-            with top_r:
-                st.metric("Match", f"{match_pct}%", icon=":material/target:")
-            st.progress(min(int(match_pct or 0), 100) / 100.0, text=f"Match score {match_pct}%")
-            m1, m2 = st.columns(2)
-            m1.metric("Est. revenue", revenue, icon=":material/payments:")
-            m2.markdown(
-                f"<div class='feature-text'>{html.escape(str(outlook))}</div>",
-                unsafe_allow_html=True,
-            )
-
-            if not landing:
-                a1, a2, a3 = st.columns(3)
-                with a1:
-                    if crop in pinned:
+    cols_per_row = 3 if landing else 2
+    for start in range(0, len(results), cols_per_row):
+        row_slice = results[start : start + cols_per_row]
+        grid_cols = st.columns(cols_per_row, gap="medium")
+        for offset, row in enumerate(row_slice):
+            i = start + offset
+            crop = str(row.get("crop_name", "")).strip()
+            match_pct = row.get("match_pct", 0)
+            revenue = row.get("revenue", "—")
+            outlook = html.escape(str(row.get("market_outlook", "—")))
+            with grid_cols[offset]:
+                with st.container(border=True, key=f"advisor_card_{i}"):
+                    st.markdown(
+                        f'<div class="feature-title advisor-tile">🌾 {html.escape(crop)}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.progress(
+                        min(int(match_pct or 0), 100) / 100.0,
+                        text=f"Match {match_pct}%",
+                    )
+                    st.metric("Est. revenue", revenue, icon=":material/payments:")
+                    st.markdown(
+                        f'<div class="feature-text">{outlook}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if not landing:
+                        if crop in pinned:
+                            st.button(
+                                "📌 Pinned",
+                                key=f"adv_pin_{i}",
+                                disabled=True,
+                                use_container_width=True,
+                            )
+                        else:
+                            st.button(
+                                "📌 Pin crop",
+                                key=f"adv_pin_{i}",
+                                on_click=_pin_crop,
+                                args=(crop,),
+                                use_container_width=True,
+                            )
                         st.button(
-                            "📌 Pinned",
-                            key=f"adv_pin_{i}",
-                            disabled=True,
+                            "📋 View listings",
+                            key=f"adv_view_{i}",
+                            on_click=_go_to,
+                            args=("📋 Active Listings",),
                             use_container_width=True,
                         )
-                    else:
-                        st.button(
-                            "📌 Pin crop",
-                            key=f"adv_pin_{i}",
-                            on_click=_pin_crop,
-                            args=(crop,),
-                            use_container_width=True,
-                        )
-                with a2:
-                    st.button(
-                        "📋 View listings",
-                        key=f"adv_view_{i}",
-                        on_click=_go_to,
-                        args=("📋 Active Listings",),
-                        use_container_width=True,
-                    )
-                with a3:
-                    st.button(
-                        "🌱 List this crop",
-                        key=f"adv_list_{i}",
-                        on_click=_go_to,
-                        args=("🌾 Add Listing",),
-                        use_container_width=True,
-                    )
+                        if st.session_state["auth"]["role"] == "farmer":
+                            st.button(
+                                "🌱 List this crop",
+                                key=f"adv_list_{i}",
+                                on_click=_go_to,
+                                args=("🌾 Add Listing",),
+                                use_container_width=True,
+                            )
 
     if landing:
         _render_advisor_landing_footer()
@@ -592,7 +595,9 @@ def render_order_tracker():
             )
 
     nexts = _ORDER_NEXT.get(status, [])
-    if nexts:
+    if st.session_state["auth"]["role"] == "guest":
+        st.caption("Sign in to advance this order's status.")
+    elif nexts:
         st.markdown('<div class="section-label">Advance status</div>', unsafe_allow_html=True)
         who = st.text_input("Changed by (optional)", value="", placeholder="e.g. your_name")
         bcols = st.columns(len(nexts))
@@ -888,7 +893,6 @@ def _build_summary_pdf(title, meta_rows, df=None):
         pdf.set_font("Helvetica", size=9)
         cols = list(df.columns)[:8]
         rows = df[cols].head(40)
-        col_w = max(10, (pdf.w - 20) / max(len(cols), 1))
         for _, r in rows.iterrows():
             line = " | ".join(str(r[c])[:18] for c in cols)
             pdf.cell(0, 6, line, ln=True)
@@ -1510,6 +1514,8 @@ st.markdown(
     }
     ::-webkit-scrollbar-thumb:hover { background: var(--agri-green-deep); }
 
+    *:focus:not(:focus-visible) { outline: none; }
+
     *:focus-visible {
         outline: 2px solid var(--agri-green) !important;
         outline-offset: 2px !important;
@@ -2022,6 +2028,24 @@ st.markdown(
         border-radius: 12px;
     }
 
+    [data-testid="stVerticalBlockBorderWrapper"]:has(.advisor-tile) {
+        border-radius: 16px;
+        height: 100%;
+        border-color: #DDE7E2;
+        box-shadow: 0 8px 22px rgba(16, 24, 40, 0.06);
+        transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+    }
+
+    [data-testid="stVerticalBlockBorderWrapper"]:has(.advisor-tile):hover {
+        transform: translateY(-3px);
+        border-color: #D1FAE5;
+        box-shadow: 0 16px 34px rgba(5, 150, 105, 0.16);
+    }
+
+    [data-testid="stVerticalBlockBorderWrapper"] .advisor-tile {
+        margin-bottom: 0.15rem;
+    }
+
     .feature-icon { transition: transform 0.3s ease; }
     .feature-card:hover .feature-icon { transform: scale(1.12) rotate(-3deg); }
 
@@ -2218,6 +2242,22 @@ def _logout():
 def _skip_login():
     st.session_state["auth"] = {"role": "guest", "id": None, "name": "Guest"}
     st.session_state["nav"] = "🏠 Home"
+
+
+def _nav_options(role):
+    opts = ["🌱 Crop Advisor", "🏠 Home"]
+    if role == "farmer":
+        opts.append("🌾 Add Listing")
+    elif role == "buyer":
+        opts.append("📦 Place Order")
+    opts += [
+        "📦 Order Tracker",
+        "📋 Active Listings",
+        "📊 Reports",
+        "🧮 Profit Calculator",
+        "🏛️ Scheme Explorer",
+    ]
+    return opts
 
 
 AADHAAR_RE = re.compile(r"^[0-9]{12}$")
@@ -2432,28 +2472,18 @@ with st.sidebar:
 
     st.markdown('<div class="nav-label">Menu</div>', unsafe_allow_html=True)
 
-    st.session_state.setdefault("nav", "🌱 Crop Advisor")
+    auth = st.session_state["auth"]
+    _nav_opts = _nav_options(auth["role"])
+    if st.session_state.get("nav") not in _nav_opts:
+        st.session_state["nav"] = "🏠 Home"
 
     page = st.radio(
         "Navigate",
-        [
-            "🌱 Crop Advisor",
-            "🏠 Home",
-            "👨‍🌾 Add Farmer",
-            "🛒 Add Buyer",
-            "🌾 Add Listing",
-            "📦 Place Order",
-            "📦 Order Tracker",
-            "📋 Active Listings",
-            "📊 Reports",
-            "🧮 Profit Calculator",
-            "🏛️ Scheme Explorer",
-        ],
+        _nav_opts,
         key="nav",
         label_visibility="collapsed",
     )
 
-    auth = st.session_state["auth"]
     if auth["role"] == "guest":
         st.markdown(
             '<div class="whoami">Browsing as <b>Guest</b>'
@@ -2503,7 +2533,7 @@ if page == "🌱 Crop Advisor":
     render_crop_advisor(landing=False)
 
 
-if page == "🏠 Home":
+elif page == "🏠 Home":
 
     st.markdown(
         """
@@ -2661,7 +2691,8 @@ if page == "🏠 Home":
     with col_info1:
         st.info(
             "📌 **Getting Started**\n\nUse the navigation menu on the left to get started. "
-            "Start by registering farmers and buyers, then create listings and place orders."
+            "Buyers can place orders and track them, farmers can list produce, "
+            "and everyone can browse listings, reports and schemes."
         )
     with col_info2:
         st.success(
@@ -2674,18 +2705,7 @@ if page == "🏠 Home":
     st.header("Open a page", anchor=False)
     st.caption("Jump straight to any part of the marketplace.")
 
-    _quick_pages = [
-        "🌱 Crop Advisor",
-        "👨‍🌾 Add Farmer",
-        "🛒 Add Buyer",
-        "🌾 Add Listing",
-        "📦 Place Order",
-        "📦 Order Tracker",
-        "📋 Active Listings",
-        "📊 Reports",
-        "🧮 Profit Calculator",
-        "🏛️ Scheme Explorer",
-    ]
+    _quick_pages = [p for p in _nav_options(auth["role"]) if p != "🏠 Home"]
     _qa_cols = st.columns(3, gap="medium")
     for _i, _target in enumerate(_quick_pages):
         with _qa_cols[_i % 3]:
@@ -2898,7 +2918,7 @@ elif page == "🌾 Add Listing":
     farmers = fetch_all("farmers", "farmer_id, name", order_by="name")
 
     if farmers.empty:
-        st.info("No farmers yet. Register a farmer first to create a listing.", icon=":material/person_add:")
+        st.info("No farmers yet. Register one from the sign-in screen to create a listing.", icon=":material/person_add:")
 
     else:
         render_crop_pinner()
@@ -2998,7 +3018,7 @@ elif page == "📦 Place Order":
 
     if buyers.empty or listings.empty:
         if buyers.empty:
-            st.warning("No buyers registered yet. Add a buyer first.", icon=":material/person_add:")
+            st.warning("No buyers registered yet. Register one from the sign-in screen.", icon=":material/person_add:")
         if listings.empty:
             st.warning("No active listings yet. Create a listing first.", icon=":material/add_circle:")
     else:
