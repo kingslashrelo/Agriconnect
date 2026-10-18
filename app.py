@@ -2,12 +2,15 @@ import os
 import re
 import html
 import json
+import time
+import unicodedata
 import urllib.request
 import urllib.parse
 
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit.components.v1 import declare_component
 from supabase import create_client
 
 load_dotenv()
@@ -341,10 +344,27 @@ def render_crop_advisor(landing=False):
             """,
             unsafe_allow_html=True,
         )
-        wx_col1, wx_col2 = st.columns([2, 1])
+        wx_col1, wx_loc, wx_col2 = st.columns([2, 1, 1])
         wx_place = wx_col1.text_input(
             "Place", placeholder="e.g. Pala", key="wx_place", label_visibility="collapsed"
         )
+        with wx_loc:
+            geo = _geolocate(key="wx_geo")
+        if geo and geo.get("ts") != st.session_state.get("wx_geo_ts"):
+            st.session_state["wx_geo_ts"] = geo["ts"]
+            if geo.get("error"):
+                _apply_weather(None, geo["error"])
+            else:
+                with st.spinner("Fetching weather for your location…"):
+                    try:
+                        data, err = _forecast(
+                            geo["lat"],
+                            geo["lon"],
+                            _reverse_label(geo["lat"], geo["lon"]),
+                        )
+                    except Exception:
+                        data, err = None, "offline"
+                _apply_weather(data, err)
         wx_go = wx_col2.button(
             "Fetch", key="wx_get", use_container_width=True, icon=":material/cloud:"
         )
@@ -357,18 +377,7 @@ def render_crop_advisor(landing=False):
                         data, err = _fetch_weather(wx_place)
                     except Exception:
                         data, err = None, "offline"
-                if data is None:
-                    st.session_state.pop("wx", None)
-                    if err == "offline":
-                        st.warning(
-                            "Weather unavailable — you appear to be offline. "
-                            "Set the temperature manually.",
-                            icon=":material/cloud_off:",
-                        )
-                    else:
-                        st.warning(err, icon=":material/search_off:")
-                else:
-                    st.session_state["wx"] = data
+                _apply_weather(data, err)
         wx = st.session_state.get("wx")
         if wx:
             w1, w2 = st.columns(2)
@@ -734,35 +743,183 @@ _WMO = {
 }
 
 
-def _fetch_weather(place):
-    q = urllib.parse.quote(place.strip())
-    geo_url = (
-        "https://geocoding-api.open-meteo.com/v1/search"
-        f"?name={q}&count=1&language=en&format=json"
+_GEO_UA = {"User-Agent": "AgriConnect/1.0 (weather location lookup)"}
+_GEO_CATS = {"place", "boundary"}
+_GEO_CURRENT = (
+    "current=temperature_2m,relative_humidity_2m,precipitation,"
+    "weather_code,wind_speed_10m"
+)
+
+_geolocate = declare_component(
+    "geolocate",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "geolocate"),
+)
+
+
+def _http_json(url, timeout=6, headers=None):
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+def _norm(text):
+    return (
+        unicodedata.normalize("NFKD", str(text or ""))
+        .encode("ascii", "ignore")
+        .decode()
+        .strip()
+        .lower()
     )
-    with urllib.request.urlopen(geo_url, timeout=6) as r:
-        geo = json.loads(r.read().decode())
+
+
+def _nominatim(query, countrycodes=None, limit=8):
+    params = {
+        "q": query,
+        "format": "jsonv2",
+        "limit": str(limit),
+        "addressdetails": "1",
+        "accept-language": "en",
+    }
+    if countrycodes:
+        params["countrycodes"] = countrycodes
+    url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode(params)
+    return _http_json(url, headers=_GEO_UA) or []
+
+
+def _geo_label(hit, fallback):
+    name = hit.get("name") or fallback
+    addr = hit.get("address") or {}
+    region = addr.get("state") or addr.get("region") or ""
+    if region and _norm(region) != _norm(name):
+        return f"{name}, {region}"
+    return name
+
+
+def _rank_geo(cands, want):
+    want = _norm(want)
+
+    def key(c):
+        exact = 1 if _norm(c.get("name")) == want else 0
+        on_place = 1 if c.get("category") == "place" else 0
+        on_topic = 1 if c.get("category") in _GEO_CATS else 0
+        imp = float(c.get("importance") or 0)
+        return (-exact, -on_place, -on_topic, -imp)
+
+    return sorted(cands, key=key)
+
+
+def _geocode(place):
+    raw = " ".join(str(place or "").split())
+    if not raw:
+        return None, "Enter a place to fetch weather."
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    want = parts[0] if parts else raw
+
+    explicit = ""
+    if len(parts) >= 2 and re.fullmatch(r"[A-Za-z]{2}", parts[-1]):
+        explicit = parts[-1].lower()
+    elif parts[-1].lower() == "india":
+        explicit = "in"
+
+    if explicit:
+        attempts = [(explicit, True), (explicit, False)]
+        om_cc = explicit
+    else:
+        attempts = [("in", True), ("", True), ("in", False), ("", False)]
+        om_cc = "IN"
+
+    for i, (cc, only_places) in enumerate(attempts):
+        if i:
+            time.sleep(1)
+        hits = _nominatim(raw, cc or None)
+        if only_places:
+            hits = [c for c in hits if c.get("category") in _GEO_CATS]
+        if hits:
+            best = _rank_geo(hits, want)[0]
+            return {"lat": float(best["lat"]), "lon": float(best["lon"]),
+                    "label": _geo_label(best, raw)}, None
+
+    geo = _http_json(
+        "https://geocoding-api.open-meteo.com/v1/search?"
+        + urllib.parse.urlencode(
+            {"name": raw, "count": 8, "language": "en", "format": "json",
+             "countryCode": om_cc}
+        )
+    )
     results = geo.get("results") or []
     if not results:
         return None, f"No location found for “{place}”."
-    loc = results[0]
+    preferred = [
+        r for r in results
+        if str(r.get("country_code", "")).upper() == om_cc.upper()
+    ]
+    loc = (preferred or results)[0]
+    region = loc.get("admin1") or loc.get("country") or ""
+    label = loc.get("name") or raw
+    if region and _norm(region) != _norm(label):
+        label = f"{label}, {region}"
+    return {"lat": float(loc["latitude"]), "lon": float(loc["longitude"]),
+            "label": label}, None
+
+
+def _reverse_label(lat, lon):
+    try:
+        url = "https://nominatim.openstreetmap.org/reverse?" + urllib.parse.urlencode(
+            {"lat": f"{float(lat):.6f}", "lon": f"{float(lon):.6f}", "zoom": "14",
+             "format": "jsonv2", "addressdetails": "1", "accept-language": "en"}
+        )
+        addr = (_http_json(url, headers=_GEO_UA) or {}).get("address") or {}
+        locality = next(
+            (addr[k] for k in ("city", "town", "village", "suburb", "county")
+             if addr.get(k)),
+            "",
+        )
+        region = addr.get("state") or addr.get("country") or ""
+        if locality and region and _norm(locality) != _norm(region):
+            return f"{locality}, {region}"
+        return locality or region or "Current location"
+    except Exception:
+        return "Current location"
+
+
+def _forecast(lat, lon, label):
     wx_url = (
         "https://api.open-meteo.com/v1/forecast"
-        f"?latitude={loc['latitude']}&longitude={loc['longitude']}"
-        "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m"
+        f"?latitude={lat}&longitude={lon}&{_GEO_CURRENT}"
     )
-    with urllib.request.urlopen(wx_url, timeout=6) as r:
-        wx = json.loads(r.read().decode())
+    wx = _http_json(wx_url, timeout=6)
     cur = wx.get("current", {})
     code = cur.get("weather_code")
     return {
-        "name": f"{loc.get('name', place)}, {loc.get('country_code', '')}".strip(", "),
+        "name": label,
         "temp": cur.get("temperature_2m"),
         "humidity": cur.get("relative_humidity_2m"),
         "precip": cur.get("precipitation"),
         "wind": cur.get("wind_speed_10m"),
         "desc": _WMO.get(code, "Unknown"),
-    }, None
+    }
+
+
+def _fetch_weather(place):
+    geo, err = _geocode(place)
+    if geo is None:
+        return None, err
+    return _forecast(geo["lat"], geo["lon"], geo["label"]), None
+
+
+def _apply_weather(data, err):
+    if data is None:
+        st.session_state.pop("wx", None)
+        if err == "offline":
+            st.warning(
+                "Weather unavailable — you appear to be offline. "
+                "Set the temperature manually.",
+                icon=":material/cloud_off:",
+            )
+        else:
+            st.warning(err, icon=":material/search_off:")
+    else:
+        st.session_state["wx"] = data
 
 
 _SCHEME_CATALOG = [
