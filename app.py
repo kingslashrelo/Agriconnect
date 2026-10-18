@@ -1,6 +1,9 @@
 import os
 import re
 import html
+import json
+import urllib.request
+import urllib.parse
 
 import pandas as pd
 import streamlit as st
@@ -206,6 +209,750 @@ def render_crop_pinner():
     st.session_state["pinned_crops"] = pinned
     stock = in_stock_crops()
     return pinned, stock
+
+
+def _recommend_crops_rpc(ph, moisture, n, p, k, temp, season):
+    if _not_configured():
+        return None
+    try:
+        rows = (
+            supabase.rpc(
+                "recommend_crops",
+                {
+                    "p_ph": ph,
+                    "p_moisture": moisture,
+                    "p_n": n,
+                    "p_p": p,
+                    "p_k": k,
+                    "p_temp": temp,
+                    "p_season": season,
+                },
+            )
+            .execute()
+            .data
+            or []
+        )
+        return rows
+    except Exception as e:
+        _record_db_error(e)
+        return None
+
+
+def _pin_crop(name):
+    name = str(name or "").strip()
+    if not name:
+        return
+    pinned = st.session_state.get("pinned_crops", [])
+    if name not in pinned:
+        pinned.append(name)
+        st.session_state["pinned_crops"] = pinned
+
+
+def _enter_marketplace():
+    st.session_state["show_login"] = True
+
+
+def _advisor_back():
+    st.session_state.pop("show_login", None)
+
+
+def render_crop_advisor(landing=False):
+    if landing:
+        st.markdown(
+            """
+            <div class="hero">
+                <div class="hero-title">🌱 AgriConnect Crop Advisor</div>
+                <div class="hero-subtitle">
+                    Enter your soil and weather conditions to instantly discover the best crops
+                    to grow — with expected revenue and market outlook. No sign-in needed.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        page_header(
+            "🌱 Crop Advisor",
+            "What should I grow?",
+            "Enter your soil and weather conditions to get data-driven crop recommendations.",
+        )
+
+    col_form, col_side = st.columns([3, 2], gap="large")
+
+    with col_form:
+        with st.form("crop_advisor_form"):
+            season = st.selectbox("Growing season", ["Kharif", "Rabi", "Summer"], index=0)
+            ph = st.slider(
+                "Soil pH", 0.0, 14.0, 6.5, 0.1, help="0 = acidic · 7 = neutral · 14 = alkaline"
+            )
+            moisture = st.slider("Soil moisture (%)", 0, 100, 50)
+            n = st.slider("Nitrogen (N)", 1.0, 5.0, 3.0, 0.1, help="1 = low · 5 = high")
+            p = st.slider("Phosphorus (P)", 1.0, 5.0, 3.0, 0.1, help="1 = low · 5 = high")
+            k = st.slider("Potassium (K)", 1.0, 5.0, 3.0, 0.1, help="1 = low · 5 = high")
+            temp = st.slider("Temperature (°C)", 0, 50, 28)
+            submitted = st.form_submit_button(
+                "🌱 Get recommendations", type="primary", use_container_width=True
+            )
+
+        if submitted:
+            with st.spinner("Scoring crops against your conditions…"):
+                rows = _recommend_crops_rpc(ph, moisture, n, p, k, temp, season)
+            st.session_state["advisor_results"] = rows
+            st.session_state["advisor_query"] = {
+                "season": season,
+                "ph": ph,
+                "moisture": moisture,
+                "n": n,
+                "p": p,
+                "k": k,
+                "temp": temp,
+            }
+
+    with col_side:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <div class="feature-title">How it works</div>
+                <div class="feature-text">
+                    We score every crop in our agronomy knowledge base against your six soil and
+                    weather parameters. Crops matching <b>4 or more</b> parameters are ranked and
+                    the top 5 are shown with expected revenue and market outlook.
+                </div>
+                <div class="feature-text">
+                    • <b>pH</b> — soil acidity / alkalinity<br>
+                    • <b>Moisture</b> — available soil water<br>
+                    • <b>N · P · K</b> — key macronutrients<br>
+                    • <b>Temperature</b> — growing-season heat
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            """
+            <div class="feature-card">
+                <div class="feature-title">Live weather</div>
+                <div class="feature-text">
+                    Pull current conditions for your area to help set an accurate
+                    growing-season temperature.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        wx_col1, wx_col2 = st.columns([2, 1])
+        wx_place = wx_col1.text_input(
+            "Place", placeholder="e.g. Pala", key="wx_place", label_visibility="collapsed"
+        )
+        wx_go = wx_col2.button(
+            "Fetch", key="wx_get", use_container_width=True, icon=":material/cloud:"
+        )
+        if wx_go:
+            if not wx_place.strip():
+                st.warning("Enter a place to fetch weather.", icon=":material/pin_drop:")
+            else:
+                with st.spinner("Fetching weather…"):
+                    try:
+                        data, err = _fetch_weather(wx_place)
+                    except Exception:
+                        data, err = None, "offline"
+                if data is None:
+                    st.session_state.pop("wx", None)
+                    if err == "offline":
+                        st.warning(
+                            "Weather unavailable — you appear to be offline. "
+                            "Set the temperature manually.",
+                            icon=":material/cloud_off:",
+                        )
+                    else:
+                        st.warning(err, icon=":material/search_off:")
+                else:
+                    st.session_state["wx"] = data
+        wx = st.session_state.get("wx")
+        if wx:
+            w1, w2 = st.columns(2)
+            w1.metric(
+                wx["name"], f"{wx['temp']} °C", help=f"Sky: {wx['desc']}"
+            )
+            w2.metric("Humidity", f"{wx['humidity']}%", help=f"Rain: {wx['precip']} mm · Wind: {wx['wind']} km/h")
+            st.caption(f"Sky: {wx['desc']}")
+            if wx.get("temp") is not None:
+                st.caption(
+                    f"Tip: set growing-season temperature near **{wx['temp']} °C** above."
+                )
+
+    results = st.session_state.get("advisor_results")
+    pinned = {str(c).strip() for c in st.session_state.get("pinned_crops", [])}
+
+    if results is None:
+        if _DB_ERROR["message"]:
+            st.warning(
+                "Recommendations are unavailable right now — the database could not be reached. "
+                "Your saved and listed crops still work everywhere else in the app.",
+                icon=":material/cloud_off:",
+            )
+        else:
+            st.info(
+                "Set your soil and weather conditions above, then hit "
+                "**Get recommendations** to see the best crops to grow.",
+                icon=":material/lightbulb:",
+            )
+        if landing:
+            _render_advisor_landing_footer()
+        return
+
+    if not results:
+        st.info(
+            "No crops strongly matched those conditions. Try widening a range "
+            "(for example a different season or a more common pH).",
+            icon=":material/search_off:",
+        )
+        if landing:
+            _render_advisor_landing_footer()
+        return
+
+    query = st.session_state.get("advisor_query", {})
+    st.markdown('<div class="section-label">🌱 Recommended crops</div>', unsafe_allow_html=True)
+    st.caption(
+        f"Season {query.get('season', '—')} · pH {query.get('ph', '—')} · "
+        f"moisture {query.get('moisture', '—')}% · N {query.get('n', '—')} · "
+        f"P {query.get('p', '—')} · K {query.get('k', '—')} · {query.get('temp', '—')}°C"
+    )
+
+    for i, row in enumerate(results):
+        crop = str(row.get("crop_name", "")).strip()
+        match_pct = row.get("match_pct", 0)
+        revenue = row.get("revenue", "—")
+        outlook = row.get("market_outlook", "—")
+        with st.container(border=True, key=f"advisor_card_{i}"):
+            top_l, top_r = st.columns([4, 1])
+            with top_l:
+                st.subheader(f"🌾 {crop}", anchor=False)
+            with top_r:
+                st.metric("Match", f"{match_pct}%", icon=":material/target:")
+            st.progress(min(int(match_pct or 0), 100) / 100.0, text=f"Match score {match_pct}%")
+            m1, m2 = st.columns(2)
+            m1.metric("Est. revenue", revenue, icon=":material/payments:")
+            m2.markdown(
+                f"<div class='feature-text'>{html.escape(str(outlook))}</div>",
+                unsafe_allow_html=True,
+            )
+
+            if not landing:
+                a1, a2, a3 = st.columns(3)
+                with a1:
+                    if crop in pinned:
+                        st.button(
+                            "📌 Pinned",
+                            key=f"adv_pin_{i}",
+                            disabled=True,
+                            use_container_width=True,
+                        )
+                    else:
+                        st.button(
+                            "📌 Pin crop",
+                            key=f"adv_pin_{i}",
+                            on_click=_pin_crop,
+                            args=(crop,),
+                            use_container_width=True,
+                        )
+                with a2:
+                    st.button(
+                        "📋 View listings",
+                        key=f"adv_view_{i}",
+                        on_click=_go_to,
+                        args=("📋 Active Listings",),
+                        use_container_width=True,
+                    )
+                with a3:
+                    st.button(
+                        "🌱 List this crop",
+                        key=f"adv_list_{i}",
+                        on_click=_go_to,
+                        args=("🌾 Add Listing",),
+                        use_container_width=True,
+                    )
+
+    if landing:
+        _render_advisor_landing_footer()
+
+
+def _render_advisor_landing_footer():
+    st.space("large")
+    st.button(
+        "Enter the marketplace →",
+        key="advisor_cta",
+        type="primary",
+        on_click=_enter_marketplace,
+        use_container_width=True,
+    )
+    st.caption(
+        "Sign in as a farmer or buyer — or browse as a guest — to list produce, "
+        "place orders and track payments."
+    )
+
+
+_ORDER_FLOW = ["pending", "confirmed", "delivered", "paid"]
+_ORDER_NEXT = {
+    "pending": ["confirmed", "cancelled"],
+    "confirmed": ["delivered", "cancelled"],
+    "delivered": ["paid"],
+    "cancelled": [],
+    "paid": [],
+}
+_ORDER_ICON = {
+    "pending": ":material/pending:",
+    "confirmed": ":material/check_circle:",
+    "delivered": ":material/local_shipping:",
+    "paid": ":material/payments:",
+    "cancelled": ":material/cancel:",
+}
+
+
+def _update_order_status_rpc(order_id, new_status, changed_by=None):
+    if _not_configured():
+        return False, "Database is not configured."
+    try:
+        supabase.rpc(
+            "update_order_status",
+            {"p_order_id": order_id, "p_new_status": new_status, "p_changed_by": changed_by},
+        ).execute()
+        return True, None
+    except Exception as e:
+        _record_db_error(e)
+        return False, str(e)
+
+
+def _do_advance(order_id, new_status, changed_by):
+    ok, err = _update_order_status_rpc(order_id, new_status, changed_by)
+    if ok:
+        st.toast(f"Order #{order_id} → {new_status.title()}", icon=":material/check_circle:")
+    else:
+        st.toast(f"Could not update: {err}", icon=":material/error:")
+
+
+def render_order_tracker():
+    page_header(
+        "Orders", "Order tracker", "Track every order through its lifecycle and advance its status."
+    )
+
+    orders = fetch_all("order_history_view", "*", order_by="order_date")
+
+    if orders.empty:
+        st.info(
+            "No orders yet. Create one from the Place Order page.", icon=":material/receipt_long:"
+        )
+        return
+
+    def _order_label(r):
+        return (
+            f"#{int(r['order_id'])} · {r['buyer_name']} ← {r['farmer_name']} · "
+            f"{r['crop_name']} · {str(r['status']).title()}"
+        )
+
+    labels = orders.apply(_order_label, axis=1).tolist()
+    picked = st.selectbox("Select an order", labels)
+    row = orders.iloc[labels.index(picked)]
+    order_id = int(row["order_id"])
+    status = str(row["status"])
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Order", f"#{order_id}", icon=":material/receipt_long:")
+    c2.metric("Status", status.title(), icon=_ORDER_ICON.get(status, ":material/help:"))
+    c3.metric(
+        "Quantity", f"{row['quantity_ordered']:g} {row['unit']}", icon=":material/scale:"
+    )
+    c4.metric("Value", f"₹ {row['order_value']:,.2f}", icon=":material/payments:")
+    st.caption(
+        f"Buyer: {row['buyer_name']} ({row['buyer_type']}) · Farmer: {row['farmer_name']} · "
+        f"Crop: {row['crop_name']} · Ordered: {row['order_date']}"
+    )
+
+    st.markdown('<div class="section-label">Order lifecycle</div>', unsafe_allow_html=True)
+    flow_cols = st.columns(len(_ORDER_FLOW))
+    cur_idx = _ORDER_FLOW.index(status) if status in _ORDER_FLOW else -1
+    for i, step in enumerate(_ORDER_FLOW):
+        with flow_cols[i]:
+            done = cur_idx >= 0 and i <= cur_idx
+            st.markdown(f"**{'✅' if done else '⚪'} {step.title()}**")
+    if status == "cancelled":
+        st.warning("This order was cancelled.", icon=":material/cancel:")
+
+    st.markdown('<div class="section-label">Status history</div>', unsafe_allow_html=True)
+    audit = fetch_eq("order_status_audit_view", "order_id", order_id, "*")
+    if audit.empty:
+        st.caption("No status changes recorded yet.")
+    else:
+        for _, h in audit.iterrows():
+            icon = _ORDER_ICON.get(str(h["new_status"]), "")
+            st.markdown(
+                f"{icon} **{str(h['old_status']).title()} → {str(h['new_status']).title()}** "
+                f"— {str(h.get('changed_by') or 'system')} · {str(h.get('changed_at', ''))[:16]}"
+            )
+
+    nexts = _ORDER_NEXT.get(status, [])
+    if nexts:
+        st.markdown('<div class="section-label">Advance status</div>', unsafe_allow_html=True)
+        who = st.text_input("Changed by (optional)", value="", placeholder="e.g. your_name")
+        bcols = st.columns(len(nexts))
+        for i, nxt in enumerate(nexts):
+            with bcols[i]:
+                st.button(
+                    f"→ {'Cancel' if nxt == 'cancelled' else nxt.title()}",
+                    key=f"adv_{order_id}_{nxt}",
+                    on_click=_do_advance,
+                    args=(order_id, nxt, who or None),
+                    type="primary" if nxt != "cancelled" else "secondary",
+                    use_container_width=True,
+                )
+    else:
+        st.success(
+            f"This order is {status.title()} — no further transitions.",
+            icon=":material/check_circle:",
+        )
+
+
+def _latest_market_price(crop):
+    try:
+        df = fetch_eq("price_history", "crop_name", crop, "avg_market_price", order_by="record_date")
+        if not df.empty and "avg_market_price" in df.columns:
+            return pd.to_numeric(df["avg_market_price"], errors="coerce").dropna().iloc[-1]
+    except Exception:
+        pass
+    return None
+
+
+def render_profit_calculator():
+    page_header(
+        "Tools",
+        "Profit & yield calculator",
+        "Estimate revenue, costs and net profit for a crop before you plant.",
+    )
+
+    crops = fetch_crop_names()
+
+    with st.form("profit_calc"):
+        crop = st.selectbox("Crop", crops)
+        st.caption(_price_hint(crop))
+        r1c1, r1c2, r1c3 = st.columns(3)
+        with r1c1:
+            yield_qty = st.number_input("Expected yield", min_value=0.0, value=100.0, step=10.0)
+        with r1c2:
+            unit = st.selectbox("Unit", ["kg", "quintal", "tonnes", "unit", "bag"])
+        with r1c3:
+            price = st.number_input("Selling price / unit (₹)", min_value=0.0, value=0.0, step=1.0)
+
+        st.markdown('<div class="section-label">Costs (₹)</div>', unsafe_allow_html=True)
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        with cc1:
+            seeds = st.number_input("Seeds", min_value=0.0, value=0.0, step=100.0)
+        with cc2:
+            fertilizer = st.number_input("Fertilizer", min_value=0.0, value=0.0, step=100.0)
+        with cc3:
+            labor = st.number_input("Labor", min_value=0.0, value=0.0, step=100.0)
+        with cc4:
+            other = st.number_input("Other", min_value=0.0, value=0.0, step=100.0)
+
+        submitted = st.form_submit_button(
+            "🧮 Calculate", type="primary", use_container_width=True
+        )
+
+    if submitted:
+        st.session_state["calc_result"] = {
+            "crop": crop,
+            "revenue": yield_qty * price,
+            "cost": seeds + fertilizer + labor + other,
+            "yield": f"{yield_qty:g} {unit}",
+            "breakdown": {
+                "Seeds": seeds,
+                "Fertilizer": fertilizer,
+                "Labor": labor,
+                "Other": other,
+            },
+        }
+
+    result = st.session_state.get("calc_result")
+    if not result:
+        st.info(
+            "Fill in your expected yield, price and costs, then hit **Calculate** to "
+            "see revenue, cost and net profit.",
+            icon=":material/calculate:",
+        )
+        return
+
+    revenue = result["revenue"]
+    cost = result["cost"]
+    profit = revenue - cost
+    margin = (profit / revenue * 100) if revenue else 0
+
+    st.markdown(f'<div class="section-label">🌱 {result["crop"]} · {result["yield"]}</div>', unsafe_allow_html=True)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Revenue", f"₹ {revenue:,.2f}", icon=":material/trending_up:")
+    m2.metric("Total cost", f"₹ {cost:,.2f}", icon=":material/payments:")
+    m3.metric(
+        "Net profit",
+        f"₹ {profit:,.2f}",
+        delta=f"{margin:.1f}%",
+        delta_color="normal" if profit >= 0 else "inverse",
+        icon=":material/account_balance:",
+    )
+    m4.metric("Margin", f"{margin:.1f}%", icon=":material/percent:")
+
+    with st.expander("Cost breakdown"):
+        bd = pd.DataFrame(
+            [{"Cost item": k, "Amount (₹)": v} for k, v in result["breakdown"].items()]
+        )
+        st.dataframe(bd, width="stretch", hide_index=True)
+
+    if profit < 0:
+        st.warning(
+            "This setup projects a loss. Try a higher-yield crop from the Crop Advisor "
+            "or renegotiating the price.",
+            icon=":material/warning:",
+        )
+
+
+def _price_hint(crop):
+    price = _latest_market_price(crop)
+    if price is not None:
+        return f"Latest market price for {crop}: ₹{price:,.2f} (from price history)"
+    return "No market price on record for this crop yet — enter your expected price."
+
+
+_WMO = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Rime fog", 51: "Light drizzle", 53: "Drizzle", 55: "Dense drizzle",
+    61: "Slight rain", 63: "Rain", 65: "Heavy rain", 71: "Slight snow", 73: "Snow",
+    75: "Heavy snow", 80: "Rain showers", 81: "Rain showers", 82: "Violent showers",
+    95: "Thunderstorm", 96: "Thunderstorm + hail", 99: "Severe thunderstorm",
+}
+
+
+def _fetch_weather(place):
+    q = urllib.parse.quote(place.strip())
+    geo_url = (
+        "https://geocoding-api.open-meteo.com/v1/search"
+        f"?name={q}&count=1&language=en&format=json"
+    )
+    with urllib.request.urlopen(geo_url, timeout=6) as r:
+        geo = json.loads(r.read().decode())
+    results = geo.get("results") or []
+    if not results:
+        return None, f"No location found for “{place}”."
+    loc = results[0]
+    wx_url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={loc['latitude']}&longitude={loc['longitude']}"
+        "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m"
+    )
+    with urllib.request.urlopen(wx_url, timeout=6) as r:
+        wx = json.loads(r.read().decode())
+    cur = wx.get("current", {})
+    code = cur.get("weather_code")
+    return {
+        "name": f"{loc.get('name', place)}, {loc.get('country_code', '')}".strip(", "),
+        "temp": cur.get("temperature_2m"),
+        "humidity": cur.get("relative_humidity_2m"),
+        "precip": cur.get("precipitation"),
+        "wind": cur.get("wind_speed_10m"),
+        "desc": _WMO.get(code, "Unknown"),
+    }, None
+
+
+_SCHEME_CATALOG = [
+    {
+        "name": "PM-KISAN",
+        "desc": "₹6,000/year income support for small & marginal farmers.",
+        "test": lambda a: 0 < a["land"] <= 2,
+    },
+    {
+        "name": "PM Fasal Bima Yojana",
+        "desc": "Subsidised crop insurance against crop loss.",
+        "test": lambda a: a["land"] > 0,
+    },
+    {
+        "name": "Soil Health Card Scheme",
+        "desc": "Free soil testing and nutrient recommendations.",
+        "test": lambda a: a["land"] > 0,
+    },
+    {
+        "name": "Kisan Credit Card",
+        "desc": "Cheap institutional credit for farming needs.",
+        "test": lambda a: a["land"] > 0 or a["livestock"],
+    },
+    {
+        "name": "Paramparagat Krishi Vikas Yojana",
+        "desc": "Support for cluster-based organic farming.",
+        "test": lambda a: a["organic"] and a["land"] > 0,
+    },
+    {
+        "name": "Agriculture Infrastructure Fund",
+        "desc": "Long-term credit for post-harvest infrastructure.",
+        "test": lambda a: a["land"] >= 2,
+    },
+]
+
+
+def render_scheme_explorer():
+    page_header(
+        "Schemes", "Scheme explorer", "Check which government schemes you may be eligible for."
+    )
+
+    auth = st.session_state.get("auth", {})
+
+    if auth.get("role") == "farmer":
+        st.markdown(
+            '<div class="section-label">Your registered schemes</div>', unsafe_allow_html=True
+        )
+        my = fetch_eq("schemes", "farmer_id", auth.get("id"), "*")
+        if my.empty:
+            st.info("No schemes registered on your profile yet.", icon=":material/account_balance:")
+        else:
+            for _, s in my.iterrows():
+                if bool(s.get("eligible")):
+                    st.success(f"✅ {s['scheme_name']} — eligible", icon=":material/verified:")
+                else:
+                    st.info(f"{s['scheme_name']} — under review", icon=":material/pending:")
+    else:
+        st.caption("Log in as a farmer to see schemes registered on your profile.")
+
+    st.divider()
+    st.markdown('<div class="section-label">Check your eligibility</div>', unsafe_allow_html=True)
+    st.caption("Answer a few questions to see schemes you likely qualify for. Indicative only.")
+
+    with st.form("scheme_check"):
+        c1, c2 = st.columns(2)
+        with c1:
+            land = st.number_input("Land holding (hectares)", min_value=0.0, value=1.0, step=0.5)
+            livestock = st.checkbox("I have livestock")
+        with c2:
+            organic = st.checkbox("Interested in organic farming")
+            income = st.number_input("Annual income (₹)", min_value=0.0, value=200000.0, step=10000.0)
+        submitted = st.form_submit_button(
+            "Check schemes", type="primary", use_container_width=True
+        )
+
+    if submitted:
+        answers = {"land": land, "livestock": livestock, "organic": organic, "income": income}
+        st.session_state["scheme_matches"] = [
+            s["name"] for s in _SCHEME_CATALOG if s["test"](answers)
+        ]
+
+    matches = st.session_state.get("scheme_matches")
+    if matches is None:
+        st.info(
+            "Answer the questions above and hit **Check schemes**.", icon=":material/badge:"
+        )
+        return
+    if not matches:
+        st.warning(
+            "No schemes matched those answers. Try adjusting land holding or income.",
+            icon=":material/search_off:",
+        )
+        return
+
+    registered = set()
+    if auth.get("role") == "farmer":
+        reg = fetch_eq("schemes", "farmer_id", auth.get("id"), "scheme_name")
+        if not reg.empty and "scheme_name" in reg.columns:
+            registered = {str(x).strip().lower() for x in reg["scheme_name"].dropna()}
+
+    for s in _SCHEME_CATALOG:
+        if s["name"] in matches:
+            already = s["name"].strip().lower() in registered
+            st.success(
+                f"**{s['name']}** — {s['desc']}"
+                + ("   ·  Already on your profile ✅" if already else ""),
+                icon=":material/verified:",
+            )
+
+
+def _build_summary_pdf(title, meta_rows, df=None):
+    try:
+        from fpdf import FPDF
+    except Exception:
+        return None
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, title, ln=True)
+    pdf.set_font("Helvetica", size=11)
+    for label, value in meta_rows:
+        pdf.cell(0, 8, f"{label}: {value}", ln=True)
+    if df is not None and not df.empty:
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Data", ln=True)
+        pdf.set_font("Helvetica", size=9)
+        cols = list(df.columns)[:8]
+        rows = df[cols].head(40)
+        col_w = max(10, (pdf.w - 20) / max(len(cols), 1))
+        for _, r in rows.iterrows():
+            line = " | ".join(str(r[c])[:18] for c in cols)
+            pdf.cell(0, 6, line, ln=True)
+    return pdf.output()
+
+
+def _render_export_tab():
+    st.markdown('<div class="section-label">Export data</div>', unsafe_allow_html=True)
+    dataset = st.selectbox(
+        "Dataset",
+        ["Active listings", "Farmers", "Orders", "Price history", "Buyers"],
+    )
+    table_map = {
+        "Active listings": "active_listings_view",
+        "Farmers": "farmers",
+        "Orders": "orders",
+        "Price history": "price_history",
+        "Buyers": "buyers",
+    }
+    table = table_map[dataset]
+    try:
+        df = fetch_all(table, "*")
+    except Exception as e:
+        st.warning(f"Could not load {dataset}: {e}", icon=":material/warning:")
+        return
+    if df.empty:
+        st.info(f"No {dataset.lower()} to export yet.", icon=":material/inventory_2:")
+        return
+
+    st.caption(f"{len(df):,} rows · {len(df.columns)} columns")
+    st.dataframe(df.head(20), width="stretch", hide_index=True)
+
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", dataset).strip("_").lower()
+    st.download_button(
+        f"⬇️ Download {dataset} (CSV)",
+        df.to_csv(index=False).encode("utf-8"),
+        file_name=f"agriconnect_{safe}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        icon=":material/download:",
+    )
+
+    with st.expander("PDF summary"):
+        n = st.number_input("Rows to include", min_value=1, max_value=40, value=10, step=1)
+        if st.button("Build PDF", use_container_width=True, icon=":material/picture_as_pdf:"):
+            pdf_bytes = _build_summary_pdf(
+                f"AgriConnect — {dataset}",
+                [("Rows", f"{len(df):,}"), ("Columns", len(df.columns))],
+                df.head(int(n)),
+            )
+            if pdf_bytes is None:
+                st.warning(
+                    "PDF export needs the `fpdf2` package. Install it and retry.",
+                    icon=":material/warning:",
+                )
+            else:
+                st.download_button(
+                    "⬇️ Download PDF",
+                    pdf_bytes,
+                    file_name=f"agriconnect_{safe}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    icon=":material/download:",
+                )
 
 
 st.set_page_config(
@@ -1518,6 +2265,11 @@ def _register(role, aadhaar, fields):
 
 
 def render_login_page():
+    st.button(
+        "← Back to Crop Advisor",
+        on_click=_advisor_back,
+        icon=":material/arrow_back:",
+    )
     _, mid, _ = st.columns([1, 1.25, 1])
     with mid:
         st.markdown(
@@ -1585,7 +2337,8 @@ def render_login_page():
                     location = st.text_input("Location / city*", max_chars=100)
                     contact = st.text_input(
                         "Phone number*", max_chars=10, placeholder="10-digit mobile number"
-                                    aadhaar = st.text_input(
+                    )
+                aadhaar = st.text_input(
                     "Aadhaar number (12 digits)*",
                     type="password",
                     max_chars=12,
@@ -1656,7 +2409,10 @@ def render_login_page():
 
 
 if not st.session_state.get("auth"):
-    render_login_page()
+    if st.session_state.get("show_login"):
+        render_login_page()
+    else:
+        render_crop_advisor(landing=True)
     st.stop()
 
 
@@ -1676,18 +2432,22 @@ with st.sidebar:
 
     st.markdown('<div class="nav-label">Menu</div>', unsafe_allow_html=True)
 
-    st.session_state.setdefault("nav", "🏠 Home")
+    st.session_state.setdefault("nav", "🌱 Crop Advisor")
 
     page = st.radio(
         "Navigate",
         [
+            "🌱 Crop Advisor",
             "🏠 Home",
             "👨‍🌾 Add Farmer",
             "🛒 Add Buyer",
             "🌾 Add Listing",
             "📦 Place Order",
+            "📦 Order Tracker",
             "📋 Active Listings",
             "📊 Reports",
+            "🧮 Profit Calculator",
+            "🏛️ Scheme Explorer",
         ],
         key="nav",
         label_visibility="collapsed",
@@ -1739,6 +2499,10 @@ st.button("🏠 Home", key="home_top", on_click=_go_home, help="Go to the home p
 _db_banner = st.empty()
 
 
+if page == "🌱 Crop Advisor":
+    render_crop_advisor(landing=False)
+
+
 if page == "🏠 Home":
 
     st.markdown(
@@ -1752,6 +2516,15 @@ if page == "🏠 Home":
         </div>
         """,
         unsafe_allow_html=True,
+    )
+
+    st.button(
+        "🌱 Try the Crop Advisor — find out what to grow",
+        key="home_advisor_cta",
+        on_click=_go_to,
+        args=("🌱 Crop Advisor",),
+        type="primary",
+        use_container_width=True,
     )
 
     st.markdown('<div class="section-label">📈 Platform Features</div>', unsafe_allow_html=True)
@@ -1902,12 +2675,16 @@ if page == "🏠 Home":
     st.caption("Jump straight to any part of the marketplace.")
 
     _quick_pages = [
+        "🌱 Crop Advisor",
         "👨‍🌾 Add Farmer",
         "🛒 Add Buyer",
         "🌾 Add Listing",
         "📦 Place Order",
+        "📦 Order Tracker",
         "📋 Active Listings",
         "📊 Reports",
+        "🧮 Profit Calculator",
+        "🏛️ Scheme Explorer",
     ]
     _qa_cols = st.columns(3, gap="medium")
     for _i, _target in enumerate(_quick_pages):
@@ -2328,31 +3105,104 @@ elif page == "📋 Active Listings":
     if listings.empty:
         st.info("No active listings right now. Check back soon.", icon=":material/inventory_2:")
     else:
+        crop_col = "crop_name" if "crop_name" in listings.columns else None
+        village_col = "village" if "village" in listings.columns else None
+        price_col = "price_per_unit" if "price_per_unit" in listings.columns else None
+
+        f1, f2, f3 = st.columns([2, 1, 1], gap="medium")
+        with f1:
+            search = st.text_input(
+                "Search", placeholder="Crop, farmer or village…", icon=":material/search:"
+            )
+        with f2:
+            crop_opts = ["All crops"]
+            if crop_col:
+                crop_opts += sorted(
+                    str(c) for c in listings[crop_col].dropna().unique().tolist()
+                )
+            crop_filter = st.selectbox("Crop", crop_opts)
+        with f3:
+            village_opts = ["All villages"]
+            if village_col:
+                village_opts += sorted(
+                    str(v) for v in listings[village_col].dropna().unique().tolist()
+                )
+            village_filter = st.selectbox("Village", village_opts)
+
+        price_range = None
+        if price_col:
+            prices = pd.to_numeric(listings[price_col], errors="coerce").dropna()
+            if not prices.empty:
+                lo, hi = float(prices.min()), float(prices.max())
+                if hi > lo:
+                    price_range = st.slider(
+                        "Price per unit (₹)", lo, hi, (lo, hi), label_visibility="collapsed"
+                    )
+                    st.caption(f"Filtering by price ₹{price_range[0]:,.0f} – ₹{price_range[1]:,.0f}")
+
+        filtered = listings
+        if search:
+            terms = [c for c in [crop_col, "farmer_name", village_col] if c]
+            if terms:
+                mask = filtered[terms].astype(str).apply(
+                    lambda col: col.str.contains(search, case=False, na=False)
+                ).any(axis=1)
+                filtered = filtered[mask]
+        if crop_filter != "All crops" and crop_col:
+            filtered = filtered[filtered[crop_col] == crop_filter]
+        if village_filter != "All villages" and village_col:
+            filtered = filtered[filtered[village_col] == village_filter]
+        if price_range and price_col:
+            pp = pd.to_numeric(filtered[price_col], errors="coerce")
+            filtered = filtered[(pp >= price_range[0]) & (pp <= price_range[1])]
+        filtered = filtered.reset_index(drop=True)
+
         pinned = [str(c).strip() for c in st.session_state.get("pinned_crops", [])]
-        if pinned:
-            listings["_pinned"] = listings["crop_name"].isin(pinned).astype(int)
-            listings = (
-                listings.sort_values(["_pinned", "harvest_date"], ascending=[False, True])
+        if pinned and crop_col:
+            filtered["_pinned"] = filtered[crop_col].isin(pinned).astype(int)
+            filtered = (
+                filtered.sort_values(["_pinned", "harvest_date"], ascending=[False, True])
                 .drop(columns="_pinned")
                 .reset_index(drop=True)
             )
 
-        total_qty = listings["quantity"].sum() if "quantity" in listings.columns else 0
-        farmers_count = listings["farmer_name"].nunique() if "farmer_name" in listings.columns else 0
+        total_qty = filtered["quantity"].sum() if "quantity" in filtered.columns else 0
+        farmers_count = filtered["farmer_name"].nunique() if "farmer_name" in filtered.columns else 0
 
-        stat1, stat2, stat3 = st.columns(3, gap="large")
-        stat1.metric("Listings", f"{len(listings):,}", icon=":material/inventory_2:")
+        stat1, stat2, stat3, stat4 = st.columns(4, gap="large")
+        stat1.metric("Listings", f"{len(filtered):,}", icon=":material/inventory_2:")
         stat2.metric("Total quantity", f"{total_qty:,.1f}", icon=":material/scale:")
         stat3.metric("Farmers", f"{farmers_count:,}", icon=":material/agriculture:")
+        if price_col and not filtered.empty:
+            avg_price = pd.to_numeric(filtered[price_col], errors="coerce").mean()
+            stat4.metric("Avg price (₹)", f"₹ {avg_price:,.2f}", icon=":material/payments:")
+        else:
+            stat4.metric("Avg price (₹)", "—", icon=":material/payments:")
 
-        st.dataframe(
-            listings,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "price_per_unit": st.column_config.NumberColumn(label="Price (₹)", format="₹%.2f"),
-            },
-        )
+        if filtered.empty:
+            st.warning("No listings match your filters.", icon=":material/filter_alt_off:")
+        else:
+            st.dataframe(
+                filtered,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    price_col: st.column_config.NumberColumn(label="Price (₹)", format="₹%.2f")
+                    if price_col
+                    else None,
+                },
+            )
+            st.download_button(
+                "⬇️ Export listings (CSV)",
+                data=filtered.to_csv(index=False).encode("utf-8"),
+                file_name="active_listings.csv",
+                mime="text/csv",
+                icon=":material/download:",
+            )
+
+
+elif page == "📦 Order Tracker":
+    render_order_tracker()
 
 
 elif page == "📊 Reports":
@@ -2368,6 +3218,7 @@ elif page == "📊 Reports":
             "📦 Unsold stock (15+ days)",
             "⭐ Average farmer rating",
             "💰 Pending payments",
+            "📤 Export data (CSV / PDF)",
         ],
     )
 
@@ -2436,6 +3287,14 @@ elif page == "📊 Reports":
                     p2.metric("Min price (₹)", f"₹ {min_price:,.2f}", icon=":material/trending_down:")
                     p3.metric("Max price (₹)", f"₹ {max_price:,.2f}", icon=":material/trending_up:")
 
+                if "record_date" in price_data.columns and "avg_market_price" in price_data.columns:
+                    chart_df = price_data[["record_date", "avg_market_price"]].copy()
+                    chart_df["avg_market_price"] = pd.to_numeric(
+                        chart_df["avg_market_price"], errors="coerce"
+                    )
+                    chart_df = chart_df.dropna().set_index("record_date")
+                    st.line_chart(chart_df, height=300)
+
                 st.dataframe(price_data, width="stretch", hide_index=True)
         except Exception as e:
             st.warning(f"Could not load price data: {e}", icon=":material/warning:")
@@ -2491,6 +3350,17 @@ elif page == "📊 Reports":
                 st.dataframe(payments, width="stretch", hide_index=True)
         except Exception as e:
             st.warning(f"Could not load payment data: {e}", icon=":material/warning:")
+
+    elif report == "📤 Export data (CSV / PDF)":
+        _render_export_tab()
+
+
+elif page == "🧮 Profit Calculator":
+    render_profit_calculator()
+
+
+elif page == "🏛️ Scheme Explorer":
+    render_scheme_explorer()
 
 
 if _DB_ERROR["message"]:
