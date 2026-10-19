@@ -529,14 +529,14 @@ def _do_advance(order_id, new_status, changed_by):
 
 def render_order_tracker():
     page_header(
-        "Orders", "Order tracker", "Track your orders through their lifecycle."
+        "Orders", "Order & listing tracker", "Track your orders and listings in one place."
     )
 
     auth = st.session_state["auth"]
     role = auth["role"]
     if role == "guest":
         st.info(
-            "Sign in with a farmer or buyer account to track your orders.",
+            "Sign in with a farmer or buyer account to track your orders and listings.",
             icon=":material/account_circle:",
         )
         return
@@ -545,107 +545,163 @@ def render_order_tracker():
     orders_raw = fetch_all("orders", "order_id, listing_id, buyer_id")
     listings_map = fetch_all("listings", "listing_id, farmer_id")
 
-    orders = pd.DataFrame()
-    if not hist.empty and not orders_raw.empty:
-        if role == "buyer":
-            my_ids = set(
-                orders_raw.loc[orders_raw["buyer_id"] == auth["id"], "order_id"].tolist()
-            )
-        else:
-            my_listing_ids = set(
-                listings_map.loc[listings_map["farmer_id"] == auth["id"], "listing_id"].tolist()
-            )
-            my_ids = set(
-                orders_raw.loc[orders_raw["listing_id"].isin(my_listing_ids), "order_id"].tolist()
-            )
-        orders = hist[hist["order_id"].isin(my_ids)].reset_index(drop=True)
-
-    if orders.empty:
-        st.info(
-            "No orders yet for your account. Create one from the Place Order page.",
-            icon=":material/receipt_long:",
-        )
-        return
-
-    def _order_label(r):
-        return (
-            f"#{int(r['order_id'])} · {r['buyer_name']} ← {r['farmer_name']} · "
-            f"{r['crop_name']} · {str(r['status']).title()}"
-        )
-
-    labels = orders.apply(_order_label, axis=1).tolist()
-    picked = st.selectbox("Select an order", labels)
-    row = orders.iloc[labels.index(picked)]
-    order_id = int(row["order_id"])
-    status = str(row["status"])
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Order", f"#{order_id}", icon=":material/receipt_long:")
-    c2.metric("Status", status.title(), icon=_ORDER_ICON.get(status, ":material/help:"))
-    c3.metric(
-        "Quantity", f"{row['quantity_ordered']:g} {row['unit']}", icon=":material/scale:"
-    )
-    c4.metric("Value", f"₹ {row['order_value']:,.2f}", icon=":material/payments:")
-    st.caption(
-        f"Buyer: {row['buyer_name']} ({row['buyer_type']}) · Farmer: {row['farmer_name']} · "
-        f"Crop: {row['crop_name']} · Ordered: {row['order_date']}"
-    )
-
-    st.markdown('<div class="section-label">📍 Order status</div>', unsafe_allow_html=True)
-    audit = fetch_eq("order_status_audit_view", "order_id", order_id, "*")
-    audit_map = {}
-    if not audit.empty:
-        for _, h in audit.iterrows():
-            audit_map.setdefault(
-                str(h["new_status"]),
-                (str(h.get("changed_at", ""))[:10], str(h.get("changed_by") or "system")),
-            )
-    cur_idx = _ORDER_FLOW.index(status) if status in _ORDER_FLOW else -1
-    step_html = []
-    for i, step in enumerate(_ORDER_FLOW):
-        if cur_idx >= 0 and i < cur_idx:
-            cls = "done"
-        elif i == cur_idx:
-            cls = "current"
-        else:
-            cls = "todo"
-        when, who = audit_map.get(step, ("", ""))
-        sub = html.escape(f"{when} · {who}" if when else "")
-        step_html.append(
-            f'<div class="track-step {cls}">'
-            f'<div class="track-dot">{"✓" if cls == "done" else ""}</div>'
-            f'<div class="track-label">{step.title()}</div>'
-            f'<div class="track-sub">{sub}</div>'
-            "</div>"
-        )
-    st.markdown('<div class="track">' + "".join(step_html) + "</div>", unsafe_allow_html=True)
-    if status == "cancelled":
-        st.warning("This order was cancelled.", icon=":material/cancel:")
-
-    nexts = _ORDER_NEXT.get(status, [])
-    if nexts:
-        st.markdown('<div class="section-label">Advance status</div>', unsafe_allow_html=True)
-        who = st.text_input(
-            "Changed by (optional)",
-            value=str(auth.get("name") or ""),
-            placeholder="e.g. your_name",
-        )
-        bcols = st.columns(len(nexts))
-        for i, nxt in enumerate(nexts):
-            with bcols[i]:
-                st.button(
-                    f"→ {'Cancel' if nxt == 'cancelled' else nxt.title()}",
-                    key=f"adv_{order_id}_{nxt}",
-                    on_click=_do_advance,
-                    args=(order_id, nxt, who or None),
-                    type="primary" if nxt != "cancelled" else "secondary",
-                    use_container_width=True,
-                )
+    if orders_raw.empty:
+        my_order_rows = pd.DataFrame(columns=["order_id", "listing_id", "buyer_id"])
+    elif role == "buyer":
+        my_order_rows = orders_raw[orders_raw["buyer_id"] == auth["id"]]
     else:
-        st.success(
-            f"This order is {status.title()} — no further transitions.",
-            icon=":material/check_circle:",
+        _my_lids_all = set(
+            listings_map.loc[listings_map["farmer_id"] == auth["id"], "listing_id"].tolist()
+        ) if not listings_map.empty else set()
+        my_order_rows = orders_raw[orders_raw["listing_id"].isin(_my_lids_all)]
+    my_order_rows = my_order_rows.reset_index(drop=True)
+    my_order_ids = set(my_order_rows["order_id"].tolist())
+    if role == "farmer":
+        my_listing_ids = _my_lids_all
+    else:
+        my_listing_ids = set(my_order_rows["listing_id"].tolist())
+
+    tab_orders, tab_listings = st.tabs(["📦 My orders", "📋 My listings"])
+
+    with tab_orders:
+        orders = (
+            hist[hist["order_id"].isin(my_order_ids)].reset_index(drop=True)
+            if not hist.empty
+            else pd.DataFrame()
         )
+        if orders.empty:
+            st.info(
+                "No orders yet for your account. Create one from the Place Order page.",
+                icon=":material/receipt_long:",
+            )
+        else:
+
+            def _order_label(r):
+                return (
+                    f"#{int(r['order_id'])} · {r['buyer_name']} ← {r['farmer_name']} · "
+                    f"{r['crop_name']} · {str(r['status']).title()}"
+                )
+
+            labels = orders.apply(_order_label, axis=1).tolist()
+            picked = st.selectbox("Select an order", labels)
+            row = orders.iloc[labels.index(picked)]
+            order_id = int(row["order_id"])
+            status = str(row["status"])
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Order", f"#{order_id}", icon=":material/receipt_long:")
+            c2.metric("Status", status.title(), icon=_ORDER_ICON.get(status, ":material/help:"))
+            c3.metric(
+                "Quantity", f"{row['quantity_ordered']:g} {row['unit']}", icon=":material/scale:"
+            )
+            c4.metric("Value", f"₹ {row['order_value']:,.2f}", icon=":material/payments:")
+            st.caption(
+                f"Buyer: {row['buyer_name']} ({row['buyer_type']}) · Farmer: {row['farmer_name']} · "
+                f"Crop: {row['crop_name']} · Ordered: {row['order_date']}"
+            )
+
+            st.markdown(
+                '<div class="section-label">📍 Order status</div>', unsafe_allow_html=True
+            )
+            audit = fetch_eq("order_status_audit_view", "order_id", order_id, "*")
+            audit_map = {}
+            if not audit.empty:
+                for _, h in audit.iterrows():
+                    audit_map.setdefault(
+                        str(h["new_status"]),
+                        (str(h.get("changed_at", ""))[:10], str(h.get("changed_by") or "system")),
+                    )
+            cur_idx = _ORDER_FLOW.index(status) if status in _ORDER_FLOW else -1
+            step_html = []
+            for i, step in enumerate(_ORDER_FLOW):
+                if cur_idx >= 0 and i < cur_idx:
+                    cls = "done"
+                elif i == cur_idx:
+                    cls = "current"
+                else:
+                    cls = "todo"
+                when, who = audit_map.get(step, ("", ""))
+                sub = html.escape(f"{when} · {who}" if when else "")
+                step_html.append(
+                    f'<div class="track-step {cls}">'
+                    f'<div class="track-dot">{"✓" if cls == "done" else ""}</div>'
+                    f'<div class="track-label">{step.title()}</div>'
+                    f'<div class="track-sub">{sub}</div>'
+                    "</div>"
+                )
+            st.markdown(
+                '<div class="track">' + "".join(step_html) + "</div>", unsafe_allow_html=True
+            )
+            if status == "cancelled":
+                st.warning("This order was cancelled.", icon=":material/cancel:")
+
+            nexts = _ORDER_NEXT.get(status, [])
+            if nexts:
+                st.markdown(
+                    '<div class="section-label">Advance status</div>', unsafe_allow_html=True
+                )
+                who = str(auth.get("name") or "") or None
+                bcols = st.columns(len(nexts))
+                for i, nxt in enumerate(nexts):
+                    with bcols[i]:
+                        st.button(
+                            f"→ {'Cancel' if nxt == 'cancelled' else nxt.title()}",
+                            key=f"adv_{order_id}_{nxt}",
+                            on_click=_do_advance,
+                            args=(order_id, nxt, who),
+                            type="primary" if nxt != "cancelled" else "secondary",
+                            use_container_width=True,
+                        )
+            else:
+                st.success(
+                    f"This order is {status.title()} — no further transitions.",
+                    icon=":material/check_circle:",
+                )
+
+    with tab_listings:
+        listings_all = fetch_all("listings", "*")
+        mine = (
+            listings_all[listings_all["listing_id"].isin(my_listing_ids)].reset_index(drop=True)
+            if not listings_all.empty
+            else pd.DataFrame()
+        )
+        if mine.empty:
+            st.info(
+                "No listings to show for your account yet."
+                if role == "farmer"
+                else "You haven't ordered from any listings yet.",
+                icon=":material/inventory_2:",
+            )
+        else:
+            if not orders_raw.empty:
+                _counts = orders_raw.groupby("listing_id").size()
+                mine["orders"] = mine["listing_id"].map(_counts).fillna(0).astype(int)
+            else:
+                mine["orders"] = 0
+            active_n = int((mine["status"] == "active").sum()) if "status" in mine.columns else 0
+            sold_n = int((mine["status"] == "sold_out").sum()) if "status" in mine.columns else 0
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Listings", f"{len(mine):,}", icon=":material/inventory_2:")
+            m2.metric("Active", f"{active_n:,}", icon=":material/check_circle:")
+            m3.metric(
+                "Orders received" if role == "farmer" else "Orders placed",
+                f"{int(mine['orders'].sum() if role == 'farmer' else len(my_order_rows)):,}",
+                icon=":material/receipt_long:",
+            )
+            if role == "farmer":
+                st.caption(f"{sold_n:,} listing(s) currently marked sold out.")
+            st.dataframe(
+                mine,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "price_per_unit": st.column_config.NumberColumn(
+                        label="Price (₹)", format="₹%.2f"
+                    )
+                }
+                if "price_per_unit" in mine.columns
+                else None,
+            )
 
 
 def _latest_market_price(crop):
@@ -2601,7 +2657,7 @@ def _nav_options(role):
     elif role == "buyer":
         opts.append("📦 Place Order")
     opts += [
-        "📦 Order Tracker",
+        "📦 Order/Listing Tracker",
         "📋 Active Listings",
         "📊 Reports",
         "🧮 Profit Calculator",
@@ -3595,15 +3651,10 @@ elif page == "📋 Active Listings":
         total_qty = filtered["quantity"].sum() if "quantity" in filtered.columns else 0
         farmers_count = filtered["farmer_name"].nunique() if "farmer_name" in filtered.columns else 0
 
-        stat1, stat2, stat3, stat4 = st.columns(4, gap="large")
+        stat1, stat2, stat3 = st.columns(3, gap="large")
         stat1.metric("Listings", f"{len(filtered):,}", icon=":material/inventory_2:")
         stat2.metric("Total quantity", f"{total_qty:,.1f}", icon=":material/scale:")
         stat3.metric("Farmers", f"{farmers_count:,}", icon=":material/agriculture:")
-        if price_col and not filtered.empty:
-            avg_price = pd.to_numeric(filtered[price_col], errors="coerce").mean()
-            stat4.metric("Avg price (₹)", f"₹ {avg_price:,.2f}", icon=":material/payments:")
-        else:
-            stat4.metric("Avg price (₹)", "—", icon=":material/payments:")
 
         if filtered.empty:
             st.warning("No listings match your filters.", icon=":material/filter_alt_off:")
@@ -3627,7 +3678,7 @@ elif page == "📋 Active Listings":
             )
 
 
-elif page == "📦 Order Tracker":
+elif page == "📦 Order/Listing Tracker":
     render_order_tracker()
 
 
