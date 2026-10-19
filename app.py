@@ -3574,74 +3574,86 @@ elif page == "📦 Place Order":
 
         listings["label"] = listings.apply(listing_label, axis=1)
 
-        with st.form("order_form", clear_on_submit=True):
-            col1, col2 = st.columns(2, gap="large")
-            with col1:
-                buyer_id = int(auth["id"])
-                st.markdown("**Buyer**")
-                st.info(f"🛒 {auth['name']} (your account)", icon=":material/account_circle:")
-            with col2:
-                listing_pick = st.selectbox("Listing*", listings["label"])
-                listing_row = listings.loc[listings["label"] == listing_pick].iloc[0]
-                listing_id = int(listing_row["listing_id"])
+        _flash = st.session_state.pop("order_flash", None)
+        if _flash:
+            st.success(_flash, icon=":material/check_circle:")
+            st.balloons()
 
-            col3, col4 = st.columns(2, gap="large")
-            with col3:
-                max_qty = float(listing_row["quantity"])
-                qty = st.number_input(
-                    "Quantity*",
-                    min_value=min(0.1, max_qty),
-                    max_value=max_qty,
-                    step=0.5,
-                    format="%.2f",
-                )
-                st.caption(f"Max {listing_row['quantity']} {listing_row['unit']}")
-            with col4:
-                total_price = qty * listing_row["price_per_unit"]
-                st.metric("Order total", f"₹ {total_price:,.2f}")
-                st.caption(f"@ ₹{listing_row['price_per_unit']}/unit")
+        col1, col2 = st.columns(2, gap="large")
+        with col1:
+            buyer_id = int(auth["id"])
+            st.markdown("**Buyer**")
+            st.info(f"🛒 {auth['name']} (your account)", icon=":material/account_circle:")
+        with col2:
+            listing_pick = st.selectbox(
+                "Listing*", listings["label"], key="_order_listing"
+            )
+            listing_row = listings.loc[listings["label"] == listing_pick].iloc[0]
+            listing_id = int(listing_row["listing_id"])
 
-            with st.container(border=True, key="agri_glass_b"):
-                st.markdown(
-                    f"""
-                    **Order summary**
+        price_per_unit = float(listing_row["price_per_unit"])
+        max_qty = float(listing_row["quantity"])
+        qty_lo = min(0.1, max_qty)
+        if "_order_qty" not in st.session_state:
+            st.session_state["_order_qty"] = min(1.0, max_qty)
+        st.session_state["_order_qty"] = min(
+            max(float(st.session_state["_order_qty"]), qty_lo), max_qty
+        )
 
-                    - Buyer: {auth['name']} (you)
-                    - Produce: {listing_row['crop_name']} from {listing_row['farmer_name']}
-                    - Quantity: {qty:g} {listing_row['unit']}
-                    - Total: ₹{total_price:,.2f}
-                    """
-                )
+        col3, col4 = st.columns(2, gap="large")
+        with col3:
+            qty = st.number_input(
+                "Quantity*",
+                min_value=qty_lo,
+                max_value=max_qty,
+                step=0.5,
+                format="%.2f",
+                key="_order_qty",
+            )
+            st.caption(f"Max {max_qty:g} {listing_row['unit']}")
+        with col4:
+            total_price = qty * price_per_unit
+            st.metric("Order total", f"₹ {total_price:,.2f}")
+            st.caption(f"@ ₹{price_per_unit:,.2f}/{listing_row['unit']}")
 
-            submitted = st.form_submit_button("Place order", icon=":material/shopping_cart_checkout:")
+        with st.container(border=True, key="agri_glass_b"):
+            st.markdown(
+                f"""
+                **Order summary**
 
-            if submitted:
-                errors = []
-                if qty <= 0:
-                    errors.append("Order quantity must be greater than 0.")
-                if qty > float(listing_row["quantity"]):
-                    errors.append(f"Insufficient stock. Maximum is {listing_row['quantity']} {listing_row['unit']}.")
+                - Buyer: {auth['name']} (you)
+                - Produce: {listing_row['crop_name']} from {listing_row['farmer_name']}
+                - Quantity: {qty:g} {listing_row['unit']}
+                - Total: ₹{total_price:,.2f}
+                """
+            )
 
-                if errors:
-                    for error in errors:
-                        st.error(error, icon=":material/error:")
-                else:
-                    try:
-                        insert_row(
-                            "orders",
-                            {
-                                "buyer_id": buyer_id,
-                                "listing_id": listing_id,
-                                "quantity_ordered": qty,
-                            },
-                        )
-                        st.success(
-                            f"Order placed for {auth['name']} — ₹{total_price:,.2f}.",
-                            icon=":material/check_circle:",
-                        )
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"Database error: {e}", icon=":material/error:")
+        if st.button("Place order", icon=":material/shopping_cart_checkout:"):
+            errors = []
+            if qty <= 0:
+                errors.append("Order quantity must be greater than 0.")
+            if qty > max_qty:
+                errors.append(f"Insufficient stock. Maximum is {max_qty:g} {listing_row['unit']}.")
+
+            if errors:
+                for error in errors:
+                    st.error(error, icon=":material/error:")
+            else:
+                try:
+                    insert_row(
+                        "orders",
+                        {
+                            "buyer_id": buyer_id,
+                            "listing_id": listing_id,
+                            "quantity_ordered": qty,
+                        },
+                    )
+                    st.session_state["order_flash"] = (
+                        f"Order placed for {auth['name']} — ₹{total_price:,.2f}."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Database error: {e}", icon=":material/error:")
 
 
 elif page == "📋 Active Listings":
