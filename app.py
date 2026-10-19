@@ -273,6 +273,17 @@ def render_crop_advisor(landing=False):
             """,
             unsafe_allow_html=True,
         )
+        st.button(
+            "Enter the marketplace →",
+            key="advisor_cta",
+            type="primary",
+            on_click=_enter_marketplace,
+            use_container_width=True,
+        )
+        st.caption(
+            "Sign in as a farmer or buyer — or browse as a guest — to list produce, "
+            "place orders and track payments."
+        )
     else:
         page_header(
             "🌱 Crop Advisor",
@@ -389,18 +400,7 @@ def render_crop_advisor(landing=False):
                     )
 
     if landing:
-        st.space("large")
-        st.button(
-            "Enter the marketplace →",
-            key="advisor_cta",
-            type="primary",
-            on_click=_enter_marketplace,
-            use_container_width=True,
-        )
-        st.caption(
-            "Sign in as a farmer or buyer — or browse as a guest — to list produce, "
-            "place orders and track payments."
-        )
+        st.space("small")
 
     results = st.session_state.get("advisor_results")
     pinned = {str(c).strip() for c in st.session_state.get("pinned_crops", [])}
