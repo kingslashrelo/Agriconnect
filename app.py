@@ -2697,23 +2697,29 @@ def _nav_options(role):
 AADHAAR_RE = re.compile(r"^[0-9]{12}$")
 
 
-def _attempt_login(role, aadhaar):
+def _attempt_login_auto(aadhaar):
     if not AADHAAR_RE.match((aadhaar or "").strip()):
         return False, "Enter a valid 12-digit Aadhaar number."
     if supabase is None:
         return False, "The database is not configured. Set SUPABASE_URL and SUPABASE_KEY."
-    fn = "aadhaar_farmer_login" if role == "farmer" else "aadhaar_buyer_login"
-    id_col = "farmer_id" if role == "farmer" else "buyer_id"
-    try:
-        rows = supabase.rpc(fn, {"p_aadhaar": aadhaar.strip()}).execute().data or []
-    except Exception as e:
-        _record_db_error(e)
-        return False, "Could not reach the database. Please try again."
-    if not rows:
-        return False, "No account matches that Aadhaar. Please register first."
-    row = rows[0]
-    st.session_state["auth"] = {"role": role, "id": row.get(id_col), "name": row.get("name")}
-    return True, None
+    for role, fn, id_col in (
+        ("farmer", "aadhaar_farmer_login", "farmer_id"),
+        ("buyer", "aadhaar_buyer_login", "buyer_id"),
+    ):
+        try:
+            rows = supabase.rpc(fn, {"p_aadhaar": aadhaar.strip()}).execute().data or []
+        except Exception as e:
+            _record_db_error(e)
+            return False, "Could not reach the database. Please try again."
+        if rows:
+            row = rows[0]
+            st.session_state["auth"] = {
+                "role": role,
+                "id": row.get(id_col),
+                "name": row.get("name"),
+            }
+            return True, None
+    return False, "No account matches that Aadhaar. Please register first."
 
 
 def _register(role, aadhaar, fields):
@@ -2757,15 +2763,6 @@ def render_login_page():
             unsafe_allow_html=True,
         )
 
-        role_label = st.radio(
-            "Account type",
-            ["👨‍🌾 Farmer", "🛒 Buyer"],
-            horizontal=True,
-            label_visibility="collapsed",
-            key="auth_role",
-        )
-        role = "farmer" if role_label.startswith("👨") else "buyer"
-
         mode = st.radio(
             "Mode",
             ["Log in", "Register"],
@@ -2774,21 +2771,32 @@ def render_login_page():
             key="auth_mode",
         )
 
+        role_label = "👨‍🌾 Farmer"
+        if mode == "Register":
+            role_label = st.radio(
+                "Account type",
+                ["👨‍🌾 Farmer", "🛒 Buyer"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="auth_role",
+            )
+        role = "farmer" if role_label.startswith("👨") else "buyer"
+
         if mode == "Log in":
-            with st.form(f"login_{role}"):
+            with st.form("login"):
                 aadhaar = st.text_input(
                     "Aadhaar number (12 digits)",
                     type="password",
                     max_chars=12,
                     placeholder="•••• •••• ••••",
-                    key=f"login_aadhaar_{role}",
+                    key="login_aadhaar",
                 )
                 st.caption(
                     "Your Aadhaar is used only to sign in and is never shown or stored in plain text."
                 )
                 submitted = st.form_submit_button("Log in", icon=":material/login:")
                 if submitted:
-                    ok, msg = _attempt_login(role, aadhaar)
+                    ok, msg = _attempt_login_auto(aadhaar)
                     if ok:
                         st.session_state["nav"] = "🏠 Home"
                         st.rerun()
