@@ -843,6 +843,11 @@ _geolocate = declare_component(
     path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "geolocate"),
 )
 
+_authmem = declare_component(
+    "authmem",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "authmem"),
+)
+
 
 def _http_json(url, timeout=6, headers=None):
     req = urllib.request.Request(url, headers=headers or {})
@@ -2664,6 +2669,7 @@ def _nav_changed():
 def _logout():
     st.session_state.pop("auth", None)
     st.session_state.pop("force_page", None)
+    st.session_state["auth_clear"] = True
     st.session_state["nav"] = "🏠 Home"
 
 
@@ -2874,6 +2880,42 @@ def render_login_page():
             "View listings, reports and every page without an account. "
             "Signing in is only needed to buy or sell."
         )
+
+
+_auth_now = st.session_state.get("auth")
+_auth_clear = st.session_state.pop("auth_clear", False)
+if _auth_clear:
+    _mem = _authmem(op="clear", key="authmem")
+elif _auth_now and _auth_now.get("role") != "guest":
+    _mem = _authmem(
+        op="save",
+        payload={
+            "role": _auth_now["role"],
+            "id": _auth_now["id"],
+            "name": _auth_now["name"],
+        },
+        key="authmem",
+    )
+else:
+    _mem = _authmem(op="read", key="authmem")
+
+if isinstance(_mem, dict) and not st.session_state.get("auth"):
+    _r_role = _mem.get("role")
+    _r_id = _mem.get("id")
+    _r_name = _mem.get("name")
+    if _r_role in ("farmer", "buyer") and _r_id is not None:
+        _r_tbl = "farmers" if _r_role == "farmer" else "buyers"
+        _r_idc = "farmer_id" if _r_role == "farmer" else "buyer_id"
+        _r_df = fetch_eq(_r_tbl, _r_idc, _r_id, "name")
+        if not _r_df.empty and str(_r_df.iloc[0]["name"]) == str(_r_name):
+            st.session_state["auth"] = {
+                "role": _r_role,
+                "id": _r_id,
+                "name": _r_name,
+            }
+            st.session_state["nav"] = "🏠 Home"
+        else:
+            st.session_state["auth_clear"] = True
 
 
 if not st.session_state.get("auth"):

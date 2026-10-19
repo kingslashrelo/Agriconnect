@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; }
+</style>
+</head>
+<body>
+<script>
+(function () {
+  var KEY = "agriconnect_auth_v1";
+
+  function post(msg) {
+    msg.isStreamlitMessage = true;
+    parent.postMessage(msg, "*");
+  }
+  function send(value) {
+    post({ type: "streamlit:setComponentValue", value: value });
+  }
+  function readStored() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      if (!obj || typeof obj !== "object" || !obj.role) return null;
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  window.addEventListener("message", function (ev) {
+    var msg = ev.data;
+    if (!msg || typeof msg !== "object" || !msg.isStreamlitMessage) return;
+    if (msg.type !== "streamlit:render") return;
+    var args = msg.args || {};
+    try {
+      if (args.op === "save" && args.payload) {
+        localStorage.setItem(KEY, JSON.stringify(args.payload));
+      } else if (args.op === "clear") {
+        localStorage.removeItem(KEY);
+      }
+    } catch (e) {}
+    send(readStored());
+    post({ type: "streamlit:setFrameHeight", height: 0 });
+  });
+
+  post({ type: "streamlit:componentReady", apiVersion: 1 });
+})();
+</script>
+</body>
+</html>
