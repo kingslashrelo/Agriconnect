@@ -2648,24 +2648,34 @@ def _go_home():
 
 
 def _go_to(target):
-    st.session_state["nav"] = target
+    auth = st.session_state.get("auth")
+    opts = _nav_options(auth["role"]) if auth else ["🏠 Home"]
+    if target in opts:
+        st.session_state.pop("force_page", None)
+        st.session_state["nav"] = target
+    else:
+        st.session_state["force_page"] = target
+
+
+def _nav_changed():
+    st.session_state.pop("force_page", None)
 
 
 def _logout():
     st.session_state.pop("auth", None)
+    st.session_state.pop("force_page", None)
     st.session_state["nav"] = "🏠 Home"
 
 
 def _skip_login():
     st.session_state["auth"] = {"role": "guest", "id": None, "name": "Guest"}
+    st.session_state.pop("force_page", None)
     st.session_state["nav"] = "🏠 Home"
 
 
 def _nav_options(role):
     opts = ["🏠 Home"]
-    if role == "farmer":
-        opts.append("🌾 Add Listing")
-    elif role == "buyer":
+    if role == "buyer":
         opts.append("📦 Place Order")
     opts += [
         "📦 Order/Listing Tracker",
@@ -2900,7 +2910,10 @@ with st.sidebar:
         _nav_opts,
         key="nav",
         label_visibility="collapsed",
+        on_change=_nav_changed,
     )
+    if st.session_state.get("force_page"):
+        page = st.session_state["force_page"]
 
     if auth["role"] == "guest":
         st.markdown(
