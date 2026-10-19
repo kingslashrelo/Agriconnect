@@ -690,6 +690,17 @@ def render_order_tracker():
             )
             if role == "farmer":
                 st.caption(f"{sold_n:,} listing(s) currently marked sold out.")
+            _add_spacer, _add_col = st.columns([4, 1], gap="small")
+            with _add_col:
+                st.button(
+                    "➕ Add Listing",
+                    key="tracker_add_listing",
+                    on_click=_go_to,
+                    args=("🌾 Add Listing",),
+                    type="primary",
+                    use_container_width=True,
+                    disabled=role != "farmer",
+                )
             st.dataframe(
                 mine,
                 width="stretch",
