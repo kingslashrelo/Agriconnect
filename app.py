@@ -332,64 +332,75 @@ def render_crop_advisor(landing=False):
             unsafe_allow_html=True,
         )
 
-        st.markdown(
-            """
-            <div class="feature-card">
-                <div class="feature-title">Live weather</div>
-                <div class="feature-text">
-                    Pull current conditions for your area to help set an accurate
-                    growing-season temperature.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        wx_col1, wx_loc, wx_col2 = st.columns([2, 1, 1])
-        wx_place = wx_col1.text_input(
-            "Place", placeholder="e.g. Pala", key="wx_place", label_visibility="collapsed"
-        )
-        with wx_loc:
-            geo = _geolocate(key="wx_geo")
-        if geo and geo.get("ts") != st.session_state.get("wx_geo_ts"):
-            st.session_state["wx_geo_ts"] = geo["ts"]
-            if geo.get("error"):
-                _apply_weather(None, geo["error"])
-            else:
-                with st.spinner("Fetching weather for your location…"):
-                    try:
-                        data, err = _forecast(
-                            geo["lat"],
-                            geo["lon"],
-                            _reverse_label(geo["lat"], geo["lon"]),
-                        )
-                    except Exception:
-                        data, err = None, "offline"
-                _apply_weather(data, err)
-        wx_go = wx_col2.button(
-            "Fetch", key="wx_get", use_container_width=True, icon=":material/cloud:"
-        )
-        if wx_go:
-            if not wx_place.strip():
-                st.warning("Enter a place to fetch weather.", icon=":material/pin_drop:")
-            else:
-                with st.spinner("Fetching weather…"):
-                    try:
-                        data, err = _fetch_weather(wx_place)
-                    except Exception:
-                        data, err = None, "offline"
-                _apply_weather(data, err)
-        wx = st.session_state.get("wx")
-        if wx:
-            w1, w2 = st.columns(2)
-            w1.metric(
-                wx["name"], f"{wx['temp']} °C", help=f"Sky: {wx['desc']}"
+        with st.container(key="weather_card"):
+            st.markdown(
+                '<div class="weather-card-title">🌤 Live weather</div>',
+                unsafe_allow_html=True,
             )
-            w2.metric("Humidity", f"{wx['humidity']}%", help=f"Rain: {wx['precip']} mm · Wind: {wx['wind']} km/h")
-            st.caption(f"Sky: {wx['desc']}")
-            if wx.get("temp") is not None:
-                st.caption(
-                    f"Tip: set growing-season temperature near **{wx['temp']} °C** above."
+            wx_col1, wx_loc, wx_col2 = st.columns([2, 1, 1])
+            wx_place = wx_col1.text_input(
+                "Place", placeholder="e.g. Pala", key="wx_place", label_visibility="collapsed"
+            )
+            with wx_loc:
+                geo = _geolocate(key="wx_geo")
+            if geo and geo.get("ts") != st.session_state.get("wx_geo_ts"):
+                st.session_state["wx_geo_ts"] = geo["ts"]
+                if geo.get("error"):
+                    _apply_weather(None, geo["error"])
+                else:
+                    with st.spinner("Fetching weather for your location…"):
+                        try:
+                            data, err = _forecast(
+                                geo["lat"],
+                                geo["lon"],
+                                _reverse_label(geo["lat"], geo["lon"]),
+                            )
+                        except Exception:
+                            data, err = None, "offline"
+                    _apply_weather(data, err)
+            wx_go = wx_col2.button(
+                "Fetch", key="wx_get", use_container_width=True,
+                icon=":material/cloud:", type="primary",
+            )
+            if wx_go:
+                if not wx_place.strip():
+                    st.warning("Enter a place to fetch weather.", icon=":material/pin_drop:")
+                else:
+                    with st.spinner("Fetching weather…"):
+                        try:
+                            data, err = _fetch_weather(wx_place)
+                        except Exception:
+                            data, err = None, "offline"
+                    _apply_weather(data, err)
+            wx = st.session_state.get("wx")
+            if wx:
+                w1, w2 = st.columns(2)
+                w1.metric(
+                    wx["name"], f"{wx['temp']} °C", help=f"Sky: {wx['desc']}"
                 )
+                w2.metric(
+                    "Humidity", f"{wx['humidity']}%",
+                    help=f"Rain: {wx['precip']} mm · Wind: {wx['wind']} km/h",
+                )
+                st.caption(f"Sky: {wx['desc']} · Rain: {wx['precip']} mm · Wind: {wx['wind']} km/h")
+                if wx.get("temp") is not None:
+                    st.caption(
+                        f"Tip: set growing-season temperature near **{wx['temp']} °C** above."
+                    )
+
+    if landing:
+        st.space("large")
+        st.button(
+            "Enter the marketplace →",
+            key="advisor_cta",
+            type="primary",
+            on_click=_enter_marketplace,
+            use_container_width=True,
+        )
+        st.caption(
+            "Sign in as a farmer or buyer — or browse as a guest — to list produce, "
+            "place orders and track payments."
+        )
 
     results = st.session_state.get("advisor_results")
     pinned = {str(c).strip() for c in st.session_state.get("pinned_crops", [])}
@@ -401,14 +412,6 @@ def render_crop_advisor(landing=False):
                 "Your saved and listed crops still work everywhere else in the app.",
                 icon=":material/cloud_off:",
             )
-        else:
-            st.info(
-                "Set your soil and weather conditions above, then hit "
-                "**Get recommendations** to see the best crops to grow.",
-                icon=":material/lightbulb:",
-            )
-        if landing:
-            _render_advisor_landing_footer()
         return
 
     if not results:
@@ -417,8 +420,6 @@ def render_crop_advisor(landing=False):
             "(for example a different season or a more common pH).",
             icon=":material/search_off:",
         )
-        if landing:
-            _render_advisor_landing_footer()
         return
 
     query = st.session_state.get("advisor_query", {})
@@ -485,24 +486,6 @@ def render_crop_advisor(landing=False):
                                 args=("🌾 Add Listing",),
                                 use_container_width=True,
                             )
-
-    if landing:
-        _render_advisor_landing_footer()
-
-
-def _render_advisor_landing_footer():
-    st.space("large")
-    st.button(
-        "Enter the marketplace →",
-        key="advisor_cta",
-        type="primary",
-        on_click=_enter_marketplace,
-        use_container_width=True,
-    )
-    st.caption(
-        "Sign in as a farmer or buyer — or browse as a guest — to list produce, "
-        "place orders and track payments."
-    )
 
 
 _ORDER_FLOW = ["pending", "confirmed", "delivered", "paid"]
@@ -1196,8 +1179,20 @@ st.markdown(
     }
 
     [data-testid="stDecoration"],
-    [data-testid="stToolbar"],
     [data-testid="stAppDeployButton"] { display: none !important; }
+
+    header[data-testid="stToolbar"] {
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+    [data-testid="stToolbar"] button:not([data-testid="stExpandSidebarButton"]):not([data-testid="stExpandSidebarButton"] *) {
+        display: none !important;
+    }
+    [data-testid="stToolbar"]:has([data-testid="stExpandSidebarButton"]) {
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+    }
 
     section[data-testid="stSidebar"] {
         background: var(--glass-bg-strong);
@@ -1458,6 +1453,44 @@ st.markdown(
         line-height: 1.65;
     }
 
+    .st-key-weather_card {
+        padding: 1.75rem 1.6rem;
+        border-radius: var(--agri-radius);
+        border: 1px solid var(--agri-border);
+        background: var(--agri-glass);
+        backdrop-filter: blur(12px) saturate(140%);
+        -webkit-backdrop-filter: blur(12px) saturate(140%);
+        box-shadow: var(--agri-shadow-sm);
+        margin-bottom: 1rem;
+    }
+
+    .weather-card-title {
+        font-family: var(--agri-font-heading);
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: var(--agri-text);
+        margin-bottom: 0.9rem;
+    }
+
+    .st-key-weather_card div[data-testid="stMetric"] {
+        padding: 0.85rem 1rem;
+        background: #FFFFFF;
+        border: 1px solid var(--agri-border);
+        border-radius: 14px;
+        box-shadow: var(--agri-shadow-xs);
+    }
+
+    .st-key-weather_card div[data-testid="stMetricValue"] {
+        font-size: 1.55rem !important;
+        line-height: 1.3;
+    }
+
+    .st-key-weather_card div[data-testid="stMetricLabel"] {
+        white-space: normal;
+        word-break: break-word;
+        font-size: 0.85rem !important;
+    }
+
     .hero {
         position: relative;
         overflow: hidden;
@@ -1627,11 +1660,26 @@ st.markdown(
         .hero { padding: 2.25rem 1.75rem; }
     }
 
+    @media (max-width: 768px) {
+        div[data-testid="stMetricValue"] { font-size: 1.9rem !important; }
+        .st-key-weather_card div[data-testid="stMetricValue"] { font-size: 1.4rem !important; }
+        .hero-subtitle { font-size: 1rem; }
+    }
+
     @media (max-width: 640px) {
-        [data-testid="stMainBlockContainer"] { padding: 1rem 1rem 2.25rem; }
-        .hero { padding: 1.75rem 1.25rem; border-radius: 18px; }
-        .hero-title { font-size: 1.7rem; }
-        .feature-card { padding: 1.25rem; }
+        [data-testid="stMainBlockContainer"] { padding: 0.9rem 0.9rem 2.25rem; }
+        .hero { padding: 1.5rem 1.1rem; border-radius: 16px; }
+        .hero-title { font-size: 1.55rem; }
+        .hero-subtitle { font-size: 0.95rem; line-height: 1.55; }
+        .feature-card { padding: 1.15rem; }
+        .feature-title { font-size: 1rem; }
+        .feature-text { font-size: 0.87rem; line-height: 1.55; }
+        div[data-testid="stMetricValue"] { font-size: 1.5rem !important; }
+        .st-key-weather_card { padding: 1.15rem 1rem; }
+        .st-key-weather_card div[data-testid="stMetricValue"] { font-size: 1.3rem !important; }
+        .weather-card-title { font-size: 1.08rem; }
+        .brand-mark { width: 38px; height: 38px; font-size: 20px; }
+        .brand-name { font-size: 1.1rem; }
     }
 
     /* ========= REACTIVE / ENHANCED INTERACTIONS ========= */
