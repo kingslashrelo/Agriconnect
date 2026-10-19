@@ -529,14 +529,41 @@ def _do_advance(order_id, new_status, changed_by):
 
 def render_order_tracker():
     page_header(
-        "Orders", "Order tracker", "Track every order through its lifecycle and advance its status."
+        "Orders", "Order tracker", "Track your orders through their lifecycle."
     )
 
-    orders = fetch_all("order_history_view", "*", order_by="order_date")
+    auth = st.session_state["auth"]
+    role = auth["role"]
+    if role == "guest":
+        st.info(
+            "Sign in with a farmer or buyer account to track your orders.",
+            icon=":material/account_circle:",
+        )
+        return
+
+    hist = fetch_all("order_history_view", "*", order_by="order_date")
+    orders_raw = fetch_all("orders", "order_id, listing_id, buyer_id")
+    listings_map = fetch_all("listings", "listing_id, farmer_id")
+
+    orders = pd.DataFrame()
+    if not hist.empty and not orders_raw.empty:
+        if role == "buyer":
+            my_ids = set(
+                orders_raw.loc[orders_raw["buyer_id"] == auth["id"], "order_id"].tolist()
+            )
+        else:
+            my_listing_ids = set(
+                listings_map.loc[listings_map["farmer_id"] == auth["id"], "listing_id"].tolist()
+            )
+            my_ids = set(
+                orders_raw.loc[orders_raw["listing_id"].isin(my_listing_ids), "order_id"].tolist()
+            )
+        orders = hist[hist["order_id"].isin(my_ids)].reset_index(drop=True)
 
     if orders.empty:
         st.info(
-            "No orders yet. Create one from the Place Order page.", icon=":material/receipt_long:"
+            "No orders yet for your account. Create one from the Place Order page.",
+            icon=":material/receipt_long:",
         )
         return
 
@@ -564,34 +591,45 @@ def render_order_tracker():
         f"Crop: {row['crop_name']} · Ordered: {row['order_date']}"
     )
 
-    st.markdown('<div class="section-label">Order lifecycle</div>', unsafe_allow_html=True)
-    flow_cols = st.columns(len(_ORDER_FLOW))
+    st.markdown('<div class="section-label">📍 Order status</div>', unsafe_allow_html=True)
+    audit = fetch_eq("order_status_audit_view", "order_id", order_id, "*")
+    audit_map = {}
+    if not audit.empty:
+        for _, h in audit.iterrows():
+            audit_map.setdefault(
+                str(h["new_status"]),
+                (str(h.get("changed_at", ""))[:10], str(h.get("changed_by") or "system")),
+            )
     cur_idx = _ORDER_FLOW.index(status) if status in _ORDER_FLOW else -1
+    step_html = []
     for i, step in enumerate(_ORDER_FLOW):
-        with flow_cols[i]:
-            done = cur_idx >= 0 and i <= cur_idx
-            st.markdown(f"**{'✅' if done else '⚪'} {step.title()}**")
+        if cur_idx >= 0 and i < cur_idx:
+            cls = "done"
+        elif i == cur_idx:
+            cls = "current"
+        else:
+            cls = "todo"
+        when, who = audit_map.get(step, ("", ""))
+        sub = html.escape(f"{when} · {who}" if when else "")
+        step_html.append(
+            f'<div class="track-step {cls}">'
+            f'<div class="track-dot">{"✓" if cls == "done" else ""}</div>'
+            f'<div class="track-label">{step.title()}</div>'
+            f'<div class="track-sub">{sub}</div>'
+            "</div>"
+        )
+    st.markdown('<div class="track">' + "".join(step_html) + "</div>", unsafe_allow_html=True)
     if status == "cancelled":
         st.warning("This order was cancelled.", icon=":material/cancel:")
 
-    st.markdown('<div class="section-label">Status history</div>', unsafe_allow_html=True)
-    audit = fetch_eq("order_status_audit_view", "order_id", order_id, "*")
-    if audit.empty:
-        st.caption("No status changes recorded yet.")
-    else:
-        for _, h in audit.iterrows():
-            icon = _ORDER_ICON.get(str(h["new_status"]), "")
-            st.markdown(
-                f"{icon} **{str(h['old_status']).title()} → {str(h['new_status']).title()}** "
-                f"— {str(h.get('changed_by') or 'system')} · {str(h.get('changed_at', ''))[:16]}"
-            )
-
     nexts = _ORDER_NEXT.get(status, [])
-    if st.session_state["auth"]["role"] == "guest":
-        st.caption("Sign in to advance this order's status.")
-    elif nexts:
+    if nexts:
         st.markdown('<div class="section-label">Advance status</div>', unsafe_allow_html=True)
-        who = st.text_input("Changed by (optional)", value="", placeholder="e.g. your_name")
+        who = st.text_input(
+            "Changed by (optional)",
+            value=str(auth.get("name") or ""),
+            placeholder="e.g. your_name",
+        )
         bcols = st.columns(len(nexts))
         for i, nxt in enumerate(nexts):
             with bcols[i]:
@@ -1489,6 +1527,113 @@ st.markdown(
         white-space: normal;
         word-break: break-word;
         font-size: 0.85rem !important;
+    }
+
+    .track {
+        display: flex;
+        margin: 0.75rem 0 0.35rem;
+    }
+    .track-step {
+        flex: 1;
+        text-align: center;
+        position: relative;
+        min-width: 0;
+    }
+    .track-step::before {
+        content: "";
+        position: absolute;
+        top: 13px;
+        right: 50%;
+        width: 100%;
+        height: 3px;
+        background: var(--agri-border);
+        z-index: 0;
+    }
+    .track-step:first-child::before { display: none; }
+    .track-step.done::before,
+    .track-step.current::before { background: var(--agri-green); }
+    .track-dot {
+        position: relative;
+        z-index: 1;
+        width: 28px;
+        height: 28px;
+        margin: 0 auto;
+        border-radius: 50%;
+        background: #FFFFFF;
+        border: 2px solid var(--agri-border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #FFFFFF;
+        line-height: 1;
+    }
+    .track-step.done .track-dot {
+        background: var(--agri-green);
+        border-color: var(--agri-green);
+    }
+    .track-step.current .track-dot {
+        background: var(--agri-green);
+        border-color: var(--agri-green);
+        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.18);
+    }
+    .track-label {
+        font-size: 0.8rem;
+        font-weight: 700;
+        margin-top: 0.45rem;
+        color: var(--agri-text);
+    }
+    .track-step.todo .track-label {
+        color: var(--agri-muted);
+        font-weight: 600;
+    }
+    .track-sub {
+        font-size: 0.68rem;
+        color: var(--agri-light-muted);
+        line-height: 1.3;
+        margin-top: 0.1rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 0 2px;
+    }
+
+    .mkt-card {
+        padding: 1rem 1.1rem;
+        border-radius: var(--agri-radius);
+        border: 1px solid var(--agri-border);
+        background: #FFFFFF;
+        box-shadow: var(--agri-shadow-xs);
+        text-align: left;
+        height: 100%;
+    }
+    .mkt-crop {
+        font-family: var(--agri-font-heading);
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: var(--agri-text);
+        margin-bottom: 0.3rem;
+    }
+    .mkt-price {
+        font-family: var(--agri-font-heading);
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: var(--agri-text);
+        line-height: 1.15;
+    }
+    .mkt-delta {
+        font-size: 0.85rem;
+        font-weight: 700;
+        margin-top: 0.2rem;
+    }
+    .mkt-up .mkt-delta { color: #059669; }
+    .mkt-down .mkt-delta { color: #DC2626; }
+    .mkt-flat .mkt-delta { color: var(--agri-muted); }
+    .mkt-date {
+        font-size: 0.7rem;
+        color: var(--agri-light-muted);
+        margin-top: 0.35rem;
     }
 
     .hero {
@@ -2450,7 +2595,7 @@ def _skip_login():
 
 
 def _nav_options(role):
-    opts = ["🌱 Crop Advisor", "🏠 Home"]
+    opts = ["🏠 Home"]
     if role == "farmer":
         opts.append("🌾 Add Listing")
     elif role == "buyer":
@@ -2461,6 +2606,7 @@ def _nav_options(role):
         "📊 Reports",
         "🧮 Profit Calculator",
         "🏛️ Scheme Explorer",
+        "🌱 Crop Advisor",
     ]
     return opts
 
@@ -2904,6 +3050,48 @@ elif page == "🏠 Home":
             "✅ **Ready to go**\n\nYour marketplace is fully set up and ready to connect "
             "farmers with buyers. Create your first listing today!"
         )
+
+    st.space("medium")
+    st.markdown('<div class="section-label">📈 Market watch</div>', unsafe_allow_html=True)
+    st.caption("Latest recorded market rates for each produce — updates on every page load.")
+    _ph = fetch_all("price_history", "crop_name, record_date, avg_market_price")
+    if _ph.empty:
+        st.caption("No market price data yet.")
+    else:
+        _ph["avg_market_price"] = pd.to_numeric(_ph["avg_market_price"], errors="coerce")
+        _ph = _ph.dropna(subset=["avg_market_price"]).sort_values(
+            ["crop_name", "record_date"]
+        )
+        _mkt = []
+        for _crop, _g in _ph.groupby("crop_name"):
+            _g = _g.reset_index(drop=True)
+            _latest = _g.iloc[-1]
+            _price = float(_latest["avg_market_price"])
+            if len(_g) > 1:
+                _prev = float(_g.iloc[-2]["avg_market_price"])
+                _diff = _price - _prev
+                _pct = (_diff / _prev * 100) if _prev else 0.0
+            else:
+                _diff, _pct = 0.0, 0.0
+            _mkt.append((str(_crop), _price, _diff, _pct, str(_latest["record_date"])[:10]))
+        _mkt.sort(key=lambda r: r[0])
+        if not _mkt:
+            st.caption("No market price data yet.")
+        else:
+            _mcols = st.columns(4, gap="medium")
+            for _i, (_crop, _price, _diff, _pct, _date) in enumerate(_mkt):
+                with _mcols[_i % 4]:
+                    _arrow = "▲" if _diff > 0 else "▼" if _diff < 0 else "▬"
+                    _cls = "mkt-up" if _diff > 0 else "mkt-down" if _diff < 0 else "mkt-flat"
+                    st.markdown(
+                        f'<div class="mkt-card {_cls}">'
+                        f'<div class="mkt-crop">{html.escape(_crop)}</div>'
+                        f'<div class="mkt-price">₹{_price:,.2f}</div>'
+                        f'<div class="mkt-delta">{_arrow} {abs(_pct):.1f}%</div>'
+                        f'<div class="mkt-date">{_date}</div>'
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
 
     st.space("medium")
     st.markdown('<div class="section-label">🚀 Quick actions</div>', unsafe_allow_html=True)
