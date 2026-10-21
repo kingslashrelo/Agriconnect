@@ -715,6 +715,48 @@ def render_order_tracker():
             )
 
 
+def _render_listing_grid(df, price_col, crop_col, village_col, per_row=3):
+    rows = df.to_dict("records")
+    for start in range(0, len(rows), per_row):
+        chunk = rows[start:start + per_row]
+        columns = st.columns(per_row, gap="medium")
+        for col, row in zip(columns, chunk):
+            with col:
+                crop = str(row.get(crop_col) or "Produce") if crop_col else "Produce"
+                farmer = str(row.get("farmer_name") or "—")
+                village = str(row.get(village_col) or "").strip() if village_col else ""
+                unit = str(row.get("unit") or "unit")
+                qty = row.get("quantity")
+                try:
+                    qty_txt = f"{float(qty):g} {unit}"
+                except (TypeError, ValueError):
+                    qty_txt = f"{qty} {unit}" if qty not in (None, "") else "—"
+                price = row.get(price_col) if price_col else None
+                try:
+                    price_txt = f"₹{float(price):,.2f}<span class=\"mkt-card-per\">/{html.escape(unit)}</span>"
+                except (TypeError, ValueError):
+                    price_txt = "—"
+                crop_safe = html.escape(crop)
+                farmer_safe = html.escape(farmer)
+                loc_safe = html.escape(village)
+                st.markdown(
+                    f"""
+                    <div class="mkt-card-listing">
+                      <div class="mkt-card-top">
+                        <span class="mkt-card-crop">{crop_safe}</span>
+                        <span class="mkt-card-price">{price_txt}</span>
+                      </div>
+                      <div class="mkt-card-meta">
+                        <span class="mkt-card-farmer">{farmer_safe}</span>
+                        {f'<span class="mkt-card-dot">•</span><span class="mkt-card-loc">{loc_safe}</span>' if loc_safe else ''}
+                      </div>
+                      <div class="mkt-card-stock">Available · {html.escape(qty_txt)}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+
 def _latest_market_price(crop):
     try:
         df = fetch_eq("price_history", "crop_name", crop, "avg_market_price", order_by="record_date")
@@ -1706,6 +1748,95 @@ st.markdown(
         font-size: 0.7rem;
         color: var(--agri-light-muted);
         margin-top: 0.35rem;
+    }
+
+    .st-key-marketplace_view div[role="radiogroup"] {
+        gap: 6px;
+        margin: 0.2rem 0 0.6rem;
+    }
+    .st-key-marketplace_view div[role="radiogroup"] label {
+        padding: 0.3rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid var(--agri-border);
+        background: rgba(255, 255, 255, 0.7);
+    }
+    .st-key-marketplace_view div[role="radiogroup"] label:has(input:checked) {
+        border-color: var(--agri-green);
+        background: var(--agri-green-light);
+    }
+
+    .mkt-card-listing {
+        position: relative;
+        overflow: hidden;
+        border-radius: 18px;
+        border: 1px solid var(--agri-border);
+        background: rgba(255, 255, 255, 0.82);
+        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: var(--glass-blur);
+        box-shadow: var(--agri-shadow-xs);
+        padding: 1.05rem 1.15rem 1.15rem;
+        height: 100%;
+        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+    }
+    .mkt-card-listing::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 4px;
+        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
+        opacity: 0.85;
+    }
+    .mkt-card-listing:hover {
+        transform: translateY(-3px);
+        border-color: var(--agri-lime);
+        box-shadow: var(--agri-shadow-md);
+    }
+    .mkt-card-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-top: 0.15rem;
+    }
+    .mkt-card-crop {
+        font-family: var(--agri-font-heading);
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--agri-text);
+        line-height: 1.2;
+    }
+    .mkt-card-price {
+        font-family: var(--agri-font-heading);
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--agri-green-dark);
+        white-space: nowrap;
+    }
+    .mkt-card-per {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--agri-light-muted);
+        margin-left: 2px;
+    }
+    .mkt-card-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin-top: 0.5rem;
+        font-size: 0.82rem;
+        color: var(--agri-light-muted);
+    }
+    .mkt-card-farmer { font-weight: 600; color: var(--agri-muted); }
+    .mkt-card-dot { color: var(--agri-border); }
+    .mkt-card-stock {
+        margin-top: 0.85rem;
+        padding-top: 0.7rem;
+        border-top: 1px dashed var(--agri-border);
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--agri-green-dark);
     }
 
     .hero {
@@ -3745,16 +3876,28 @@ elif page == "📋 Active Listings":
         if filtered.empty:
             st.warning("No listings match your filters.", icon=":material/filter_alt_off:")
         else:
-            st.dataframe(
-                filtered,
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    price_col: st.column_config.NumberColumn(label="Price (₹)", format="₹%.2f")
-                    if price_col
-                    else None,
-                },
+            view = st.radio(
+                "View",
+                ["🧺 Cards", "📋 Table"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="marketplace_view",
             )
+
+            if view == "📋 Table":
+                st.dataframe(
+                    filtered,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        price_col: st.column_config.NumberColumn(label="Price (₹)", format="₹%.2f")
+                        if price_col
+                        else None,
+                    },
+                )
+            else:
+                _render_listing_grid(filtered, price_col, crop_col, village_col)
+
             st.download_button(
                 "⬇️ Export listings (CSV)",
                 data=filtered.to_csv(index=False).encode("utf-8"),
