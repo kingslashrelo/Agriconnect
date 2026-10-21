@@ -890,6 +890,11 @@ _authmem = declare_component(
     path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "authmem"),
 )
 
+_sparks = declare_component(
+    "sparks",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "sparks"),
+)
+
 
 def _http_json(url, timeout=6, headers=None):
     req = urllib.request.Request(url, headers=headers or {})
@@ -1258,59 +1263,67 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+try:
+    _sparks(key="agri_sparks", default=None)
+except Exception:
+    pass
+
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
     :root {
-        --agri-green: #059669;
-        --agri-green-dark: #047857;
-        --agri-green-deep: #065F46;
-        --agri-green-light: #ECFDF5;
-        --agri-green-soft: #F0FDF4;
-        --agri-lime: #34D399;
-        --agri-border: #E6EBE8;
-        --agri-text: #000000;
-        --agri-muted: #1A1A1A;
-        --agri-light-muted: #4B5563;
+        --olive: #43552F;
+        --olive-deep: #29351D;
+        --sage: #738A52;
+        --sage-tint: #EDF1E4;
+        --bone: #F7F5EF;
+        --bone-card: #F8FAF9;
+        --warm-border: #E4E1D4;
+        --ink: #1D1F17;
+        --ink-muted: #6B6D5C;
+
+        --agri-green: #43552F;
+        --agri-green-dark: #3A4A28;
+        --agri-green-deep: #29351D;
+        --agri-green-light: #EDF1E4;
+        --agri-green-soft: #F3F6F0;
+        --agri-lime: #738A52;
+        --agri-border: #E4E1D4;
+        --agri-text: #1D1F17;
+        --agri-muted: #3A3C31;
+        --agri-light-muted: #6B6D5C;
         --agri-surface: #FFFFFF;
-        --agri-page: #FFFFFF;
-        --agri-glass: rgba(255, 255, 255, 0.72);
-        --agri-error: #DC2626;
-        --agri-warning: #D97706;
-        --agri-success: #059669;
-        --agri-info: #2563EB;
+        --agri-page: #F7F5EF;
+        --agri-glass: #FFFFFF;
+        --agri-error: #B74128;
+        --agri-warning: #B4741C;
+        --agri-success: #43552F;
+        --agri-info: #3F5E7A;
 
         --agri-font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         --agri-font-heading: 'Space Grotesk', 'Inter', -apple-system, sans-serif;
 
-        --agri-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
-        --agri-shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.06);
-        --agri-shadow-md: 0 16px 44px rgba(15, 23, 42, 0.09);
-        --agri-shadow-lg: 0 24px 60px rgba(5, 150, 105, 0.16);
-        --agri-radius: 16px;
+        --agri-shadow-xs: none;
+        --agri-shadow-sm: none;
+        --agri-shadow-md: none;
+        --agri-shadow-lg: none;
+        --agri-radius: 14px;
 
-        --glass-bg: rgba(255, 255, 255, 0.55);
-        --glass-bg-strong: rgba(255, 255, 255, 0.72);
-        --glass-border: rgba(255, 255, 255, 0.65);
-        --glass-blur: blur(18px) saturate(160%);
-        --glass-shadow: 0 10px 34px rgba(2, 6, 23, 0.09);
+        --glass-bg: #FFFFFF;
+        --glass-bg-strong: #FFFFFF;
+        --glass-border: #E4E1D4;
+        --glass-blur: none;
+        --glass-shadow: none;
     }
 
     html { scroll-behavior: smooth; }
 
     .stApp {
-        background-color: #FFFFFF;
-        background-image:
-            radial-gradient(46rem 46rem at 10% 6%, rgba(5, 150, 105, 0.12), transparent 62%),
-            radial-gradient(40rem 40rem at 92% 10%, rgba(16, 185, 129, 0.10), transparent 64%),
-            radial-gradient(44rem 44rem at 82% 94%, rgba(59, 130, 246, 0.07), transparent 66%);
-        background-attachment: fixed;
-        background-repeat: no-repeat;
-        background-position: 0% 0%, 100% 0%, 0% 100%;
-        background-size: 130% 130%;
-        animation: agriAurora 36s ease-in-out infinite;
+        background-color: #F7F5EF;
+        background-image: none;
+        animation: none;
         color: var(--agri-text);
         font-family: var(--agri-font-body) !important;
     }
@@ -1323,7 +1336,7 @@ st.markdown(
         padding: 2rem 1.5rem 4rem;
     }
 
-    ::selection { background: #D1FAE5; color: var(--agri-green-deep); }
+    ::selection { background: #EDF1E4; color: var(--agri-green-deep); }
 
     header[data-testid="stHeader"] {
         background: transparent !important;
@@ -1347,10 +1360,10 @@ st.markdown(
     }
 
     section[data-testid="stSidebar"] {
-        background: var(--glass-bg-strong);
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
-        border-right: 1px solid var(--glass-border);
+        background: #F7F5EF;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        border-right: 1px solid #E4E1D4;
     }
 
     section[data-testid="stSidebar"] > div { background: transparent; }
@@ -1377,7 +1390,7 @@ st.markdown(
         font-family: var(--agri-font-heading);
         font-size: 1.25rem;
         font-weight: 700;
-        color: var(--agri-green-deep);
+        color: var(--agri-text);
         line-height: 1.1;
     }
 
@@ -1389,7 +1402,7 @@ st.markdown(
 
     .nav-label {
         font-size: 0.7rem;
-        font-weight: 700;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.14em;
         color: var(--agri-light-muted);
@@ -1401,27 +1414,27 @@ st.markdown(
     section[data-testid="stSidebar"] div[role="radiogroup"] label {
         width: 100%;
         border: 1px solid transparent;
-        border-radius: 12px;
-        padding: 0.6rem 0.8rem;
+        border-radius: 10px;
+        padding: 0.55rem 0.75rem;
         margin: 2px 0;
         color: var(--agri-text);
         font-weight: 600;
-        transition: all 0.2s ease;
+        transition: background 0.18s ease;
         cursor: pointer;
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-        background: var(--agri-green-soft);
+        background: #EDF1E4;
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
-        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime));
+        background: #EDF1E4;
         border-color: transparent;
-        box-shadow: 0 8px 20px rgba(5, 150, 105, 0.25);
+        box-shadow: none;
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) * {
-        color: #FFFFFF !important;
+        color: var(--agri-green-deep) !important;
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
@@ -1429,7 +1442,7 @@ st.markdown(
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label p {
-        font-size: 0.95rem;
+        font-size: 0.93rem;
         font-weight: 600;
     }
 
@@ -1461,53 +1474,74 @@ st.markdown(
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        color: var(--agri-green-dark);
+        color: var(--agri-light-muted);
         font-size: 0.72rem;
-        font-weight: 700;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.14em;
         margin-bottom: 0.5rem;
     }
 
-    .section-label::before {
-        content: "";
-        width: 20px;
-        height: 2px;
-        border-radius: 2px;
-        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
-    }
-
     .stButton > button,
     .stFormSubmitButton > button {
         width: 100%;
-        border-radius: 12px !important;
+        border-radius: 8px !important;
         border: 1px solid transparent !important;
-        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime)) !important;
+        background: #43552F !important;
         color: #FFFFFF !important;
         font-family: var(--agri-font-body) !important;
         font-weight: 600 !important;
         letter-spacing: 0.01em;
         padding: 0.7rem 1.2rem !important;
-        box-shadow: 0 8px 22px rgba(5, 150, 105, 0.28) !important;
-        transition: all 0.2s ease !important;
+        box-shadow: none !important;
+        transition: background 0.18s ease, border-color 0.18s ease !important;
     }
 
     .stButton > button:hover,
     .stFormSubmitButton > button:hover {
-        filter: brightness(1.05);
-        transform: translateY(-1px);
-        box-shadow: 0 12px 28px rgba(5, 150, 105, 0.36) !important;
+        background: #29351D !important;
+        transform: none;
+        box-shadow: none !important;
     }
 
     .stButton > button:active,
     .stFormSubmitButton > button:active { transform: translateY(0); }
 
+    .st-key-skip_login .stButton > button,
+    .st-key-skip_login button {
+        background: transparent !important;
+        border: 1px solid #E4E1D4 !important;
+        color: #43552F !important;
+    }
+    .st-key-skip_login .stButton > button:hover,
+    .st-key-skip_login button:hover {
+        background: #EDF1E4 !important;
+        border-color: #43552F !important;
+    }
+
+    section[data-testid="stSidebar"] .st-key-logout .stButton > button,
+    section[data-testid="stSidebar"] .st-key-logout button,
+    section[data-testid="stSidebar"] .st-key-guest_login .stButton > button,
+    section[data-testid="stSidebar"] .st-key-guest_login button {
+        background: transparent !important;
+        border: 1px solid #E4E1D4 !important;
+        color: #43552F !important;
+        padding: 0.45rem 1rem !important;
+    }
+    section[data-testid="stSidebar"] .st-key-logout .stButton > button:hover,
+    section[data-testid="stSidebar"] .st-key-logout button:hover,
+    section[data-testid="stSidebar"] .st-key-guest_login .stButton > button:hover,
+    section[data-testid="stSidebar"] .st-key-guest_login button:hover {
+        background: #EDF1E4 !important;
+        border-color: #43552F !important;
+    }
+
     div[data-testid="stForm"] {
         border: 1px solid var(--glass-border) !important;
         border-radius: 20px !important;
         background: var(--glass-bg-strong) !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
         padding: 1.75rem !important;
     }
@@ -1530,7 +1564,7 @@ st.markdown(
     .stDateInput input:focus,
     .stTextArea textarea:focus {
         border-color: var(--agri-green) !important;
-        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.14) !important;
+        box-shadow: 0 0 0 3px #EDF1E4 !important;
     }
 
     .stTextInput input::placeholder,
@@ -1545,64 +1579,50 @@ st.markdown(
 
     div[data-baseweb="select"] > div:focus-within {
         border-color: var(--agri-green) !important;
-        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.14) !important;
+        box-shadow: 0 0 0 3px #EDF1E4 !important;
     }
 
     .feature-card {
         height: 100%;
-        padding: 1.6rem;
-        border-radius: var(--agri-radius);
+        padding: 1.3rem 1.4rem;
+        border-radius: 12px;
         border: 1px solid var(--agri-border);
-        background: var(--agri-glass);
-        backdrop-filter: blur(12px) saturate(140%);
-        -webkit-backdrop-filter: blur(12px) saturate(140%);
-        box-shadow: var(--agri-shadow-sm);
-        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        background: #FFFFFF;
+        box-shadow: none;
+        transition: border-color 0.2s ease;
         position: relative;
         overflow: hidden;
     }
 
-    .feature-card::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 3px;
-        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
-        opacity: 0.9;
-    }
-
     .feature-card:hover {
-        transform: translateY(-4px);
-        box-shadow: var(--agri-shadow-md);
-        border-color: #D1FAE5;
+        border-color: var(--agri-green);
+        background: #FFFFFF;
     }
 
     .feature-icon {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 52px;
-        height: 52px;
-        border-radius: 14px;
-        background: var(--agri-green-light);
-        font-size: 26px;
-        margin-bottom: 0.9rem;
+        width: 38px;
+        height: 38px;
+        border-radius: 9px;
+        background: #EDF1E4;
+        font-size: 19px;
+        margin-bottom: 0.7rem;
     }
 
     .feature-title {
         font-family: var(--agri-font-heading);
-        font-size: 1.08rem;
+        font-size: 1rem;
         font-weight: 600;
         color: var(--agri-text);
-        margin-bottom: 0.35rem;
+        margin-bottom: 0.3rem;
     }
 
     .feature-text {
-        color: var(--agri-muted);
-        font-size: 0.92rem;
-        line-height: 1.65;
+        color: var(--agri-light-muted);
+        font-size: 0.88rem;
+        line-height: 1.6;
     }
 
     .st-key-weather_card {
@@ -1610,8 +1630,8 @@ st.markdown(
         border-radius: var(--agri-radius);
         border: 1px solid var(--agri-border);
         background: var(--agri-glass);
-        backdrop-filter: blur(12px) saturate(140%);
-        -webkit-backdrop-filter: blur(12px) saturate(140%);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--agri-shadow-sm);
         margin-bottom: 1rem;
     }
@@ -1690,7 +1710,7 @@ st.markdown(
     .track-step.current .track-dot {
         background: var(--agri-green);
         border-color: var(--agri-green);
-        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.18);
+        box-shadow: 0 0 0 3px #EDF1E4;
     }
     .track-label {
         font-size: 0.8rem;
@@ -1741,7 +1761,7 @@ st.markdown(
         font-weight: 700;
         margin-top: 0.2rem;
     }
-    .mkt-up .mkt-delta { color: #059669; }
+    .mkt-up .mkt-delta { color: #43552F; }
     .mkt-down .mkt-delta { color: #DC2626; }
     .mkt-flat .mkt-delta { color: var(--agri-muted); }
     .mkt-date {
@@ -1750,46 +1770,66 @@ st.markdown(
         margin-top: 0.35rem;
     }
 
-    .st-key-marketplace_view div[role="radiogroup"] {
+    .st-key-marketplace_view div[role="radiogroup"],
+    .st-key-auth_mode div[role="radiogroup"],
+    .st-key-auth_role div[role="radiogroup"] {
         gap: 6px;
         margin: 0.2rem 0 0.6rem;
-    }
-    .st-key-marketplace_view div[role="radiogroup"] label {
-        padding: 0.3rem 0.8rem;
+        background: #F7F5EF;
+        border: 1px solid #E4E1D4;
         border-radius: 999px;
-        border: 1px solid var(--agri-border);
-        background: rgba(255, 255, 255, 0.7);
+        padding: 4px;
+        width: fit-content;
     }
-    .st-key-marketplace_view div[role="radiogroup"] label:has(input:checked) {
-        border-color: var(--agri-green);
-        background: var(--agri-green-light);
+    .st-key-marketplace_view div[role="radiogroup"] label,
+    .st-key-auth_mode div[role="radiogroup"] label,
+    .st-key-auth_role div[role="radiogroup"] label {
+        padding: 0.3rem 1rem;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        background: transparent;
+    }
+    .st-key-marketplace_view div[role="radiogroup"] label:has(input:checked),
+    .st-key-auth_mode div[role="radiogroup"] label:has(input:checked),
+    .st-key-auth_role div[role="radiogroup"] label:has(input:checked) {
+        border-color: transparent;
+        background: #43552F;
+    }
+    .st-key-marketplace_view div[role="radiogroup"] label:has(input:checked) *,
+    .st-key-auth_mode div[role="radiogroup"] label:has(input:checked) *,
+    .st-key-auth_role div[role="radiogroup"] label:has(input:checked) * {
+        color: #FFFFFF !important;
+    }
+    .st-key-marketplace_view div[role="radiogroup"] label > div:first-child,
+    .st-key-auth_mode div[role="radiogroup"] label > div:first-child,
+    .st-key-auth_role div[role="radiogroup"] label > div:first-child {
+        display: none !important;
     }
 
     .mkt-card-listing {
         position: relative;
         overflow: hidden;
-        border-radius: 18px;
+        border-radius: 14px;
         border: 1px solid var(--agri-border);
-        background: rgba(255, 255, 255, 0.82);
-        -webkit-backdrop-filter: var(--glass-blur);
-        backdrop-filter: var(--glass-blur);
-        box-shadow: var(--agri-shadow-xs);
+        background: #FFFFFF;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
         padding: 1.05rem 1.15rem 1.15rem;
         height: 100%;
-        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        transition: border-color 0.2s ease;
     }
     .mkt-card-listing::before {
         content: "";
         position: absolute;
         inset: 0 0 auto 0;
         height: 4px;
-        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
-        opacity: 0.85;
+        background: linear-gradient(90deg, #43552F 0%, #43552F 55%, #738A52 100%);
+        opacity: 1;
     }
     .mkt-card-listing:hover {
-        transform: translateY(-3px);
         border-color: var(--agri-lime);
-        box-shadow: var(--agri-shadow-md);
+        box-shadow: none;
     }
     .mkt-card-top {
         display: flex;
@@ -1842,12 +1882,12 @@ st.markdown(
     .hero {
         position: relative;
         overflow: hidden;
-        padding: 3rem 2.5rem;
-        border-radius: 24px;
+        padding: 2.6rem 2.25rem;
+        border-radius: 16px;
         border: 1px solid var(--agri-border);
-        background: radial-gradient(120% 160% at 0% 0%, #ECFDF5 0%, #FFFFFF 60%);
-        box-shadow: var(--agri-shadow-sm);
-        margin-bottom: 2rem;
+        background: #F8FAF9;
+        box-shadow: none;
+        margin-bottom: 1.75rem;
     }
 
     .hero::after {
@@ -1855,29 +1895,27 @@ st.markdown(
         position: absolute;
         inset: 0;
         pointer-events: none;
-        background-image:
-            linear-gradient(rgba(5, 150, 105, 0.05) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(5, 150, 105, 0.05) 1px, transparent 1px);
+        background-image: none;
         background-size: 34px 34px;
-        -webkit-mask-image: radial-gradient(120% 120% at 100% 0%, #000 0%, transparent 55%);
-        mask-image: radial-gradient(120% 120% at 100% 0%, #000 0%, transparent 55%);
+        -webkit-mask-image: none;
+        mask-image: none;
     }
 
     .hero-title {
         font-family: var(--agri-font-heading);
-        font-size: clamp(2rem, 4.4vw, 3rem);
+        font-size: clamp(1.5rem, 3vw, 2rem);
         font-weight: 700;
-        color: var(--agri-green-deep);
-        letter-spacing: -0.03em;
-        line-height: 1.08;
-        margin-bottom: 0.75rem;
+        color: var(--agri-text);
+        letter-spacing: -0.02em;
+        line-height: 1.12;
+        margin-bottom: 0.45rem;
     }
 
     .hero-subtitle {
-        font-size: 1.05rem;
-        color: var(--agri-muted);
+        font-size: 1rem;
+        color: var(--agri-light-muted);
         max-width: 640px;
-        line-height: 1.7;
+        line-height: 1.65;
     }
 
     div[data-testid="stMetric"] {
@@ -1886,8 +1924,8 @@ st.markdown(
         border-radius: var(--agri-radius);
         padding: 1rem 1.1rem;
         box-shadow: var(--agri-shadow-xs);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 
     div[data-testid="stMetricLabel"] { color: var(--agri-muted) !important; font-weight: 600 !important; }
@@ -1911,8 +1949,8 @@ st.markdown(
         background: var(--glass-bg) !important;
         border: 1px solid var(--glass-border) !important;
         border-radius: 18px !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
     }
 
@@ -1920,8 +1958,8 @@ st.markdown(
         background: var(--glass-bg) !important;
         border: 1px solid var(--glass-border) !important;
         border-radius: 16px !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
         overflow: hidden;
     }
@@ -1933,8 +1971,8 @@ st.markdown(
         background: var(--glass-bg-strong) !important;
         border: 1px solid var(--glass-border) !important;
         border-radius: 14px !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
         padding: 0.9rem 1.1rem !important;
         font-weight: 500 !important;
@@ -1945,8 +1983,8 @@ st.markdown(
         background: var(--glass-bg) !important;
         border: 1px solid var(--glass-border) !important;
         border-radius: var(--agri-radius) !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
         overflow: hidden;
     }
@@ -1954,8 +1992,8 @@ st.markdown(
     div[data-testid="stMetric"] {
         background: var(--glass-bg) !important;
         border: 1px solid var(--glass-border) !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
     }
 
@@ -1966,8 +2004,8 @@ st.markdown(
         background: var(--glass-bg-strong) !important;
         border: 1px solid var(--glass-border) !important;
         border-radius: 14px !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
     }
 
@@ -1977,8 +2015,8 @@ st.markdown(
         background: var(--glass-bg-strong) !important;
         border: 1px solid var(--glass-border) !important;
         border-radius: 20px !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
     }
 
@@ -1991,14 +2029,14 @@ st.markdown(
     div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
         background: var(--glass-bg-strong) !important;
         border: 1px solid var(--glass-border) !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
     }
 
     div[data-testid="stSidebarUserContent"] .stButton > button {
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 
     hr { border: 0; border-top: 1px solid var(--agri-border); margin: 1.25rem 0; }
@@ -2037,31 +2075,10 @@ st.markdown(
         to { opacity: 1; transform: translateY(0); }
     }
 
-    @keyframes agriFloat {
-        0%, 100% { transform: translate(0, 0) scale(1); }
-        50% { transform: translate(20px, -24px) scale(1.08); }
-    }
-
-    @keyframes agriNavGlow {
-        0%, 100% { box-shadow: 0 8px 20px rgba(5, 150, 105, 0.25); }
-        50% { box-shadow: 0 8px 28px rgba(5, 150, 105, 0.45); }
-    }
-
-    @keyframes agriAurora {
-        0%, 100% { background-position: 0% 0%, 100% 0%, 0% 100%; }
-        33% { background-position: 12% 10%, 86% 6%, 8% 94%; }
-        66% { background-position: 6% 8%, 92% 14%, 16% 90%; }
-    }
-
-    @keyframes agriPulse {
-        0%, 100% { opacity: 0.65; }
-        50% { opacity: 1; }
-    }
-
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-track { background: #F3F6F4; }
     ::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, var(--agri-green), var(--agri-lime));
+        background: #43552F;
         border-radius: 999px;
         border: 2px solid #F3F6F4;
     }
@@ -2083,98 +2100,41 @@ st.markdown(
 
     [data-testid="stFooter"] { display: none !important; }
 
-    .brand-mark { animation: agriFloat 7s ease-in-out infinite; }
-
-    .section-label::before { animation: agriPulse 2.8s ease-in-out infinite; }
 
     .hero {
-        transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+        transition: border-color 0.25s ease;
     }
     .hero:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 26px 60px rgba(5, 150, 105, 0.15);
-        border-color: #D1FAE5;
+        border-color: var(--agri-light-muted);
     }
-    .hero::before {
-        content: "";
-        position: absolute;
-        right: -90px;
-        top: -90px;
-        width: 280px;
-        height: 280px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 30% 30%, rgba(52, 211, 153, 0.35), rgba(5, 150, 105, 0) 70%);
-        filter: blur(12px);
-        pointer-events: none;
-        animation: agriFloat 9s ease-in-out infinite;
-        z-index: 0;
-    }
-    .hero-title { transition: transform 0.2s ease, color 0.2s ease; }
-    .hero:hover .hero-title { transform: translateX(5px); }
     .hero * { position: relative; z-index: 1; }
 
-    .feature-card::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.6) 50%, transparent 70%);
-        transform: translateX(-130%) skewX(-16deg);
-        transition: transform 0.7s ease;
-        pointer-events: none;
-    }
-    .feature-card:hover::after { transform: translateX(130%) skewX(-16deg); }
-
-    .stButton > button,
-    .stFormSubmitButton > button {
-        position: relative;
-        overflow: hidden;
-    }
-    .stButton > button::after,
-    .stFormSubmitButton > button::after {
-        content: "";
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        width: 45%;
-        background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.35), transparent);
-        transform: translateX(-160%) skewX(-18deg);
-        transition: transform 0.6s ease;
-        pointer-events: none;
-    }
-    .stButton > button:hover::after,
-    .stFormSubmitButton > button:hover::after { transform: translateX(260%) skewX(-18deg); }
     .stButton > button:active,
-    .stFormSubmitButton > button:active { transform: scale(0.98); }
+    .stFormSubmitButton > button:active { transform: scale(0.99); }
 
     div[data-testid="stMetric"] {
         animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-        transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+        transition: border-color 0.25s ease;
     }
     div[data-testid="stMetric"]:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 18px 44px rgba(5, 150, 105, 0.16) !important;
-        border-color: var(--agri-lime) !important;
+        border-color: var(--agri-light-muted) !important;
     }
 
     div[data-testid="stExpander"] {
-        transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        transition: border-color 0.25s ease;
         animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
     }
     div[data-testid="stExpander"]:hover {
-        transform: translateY(-2px);
-        border-color: rgba(5, 150, 105, 0.4) !important;
-        box-shadow: 0 16px 40px rgba(5, 150, 105, 0.12) !important;
+        border-color: var(--agri-light-muted) !important;
     }
 
     div[data-testid="stDataFrame"],
     div[data-testid="stTable"] {
         animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-        transition: box-shadow 0.25s ease, border-color 0.25s ease;
+        transition: border-color 0.25s ease;
     }
     div[data-testid="stDataFrame"]:hover {
-        box-shadow: 0 16px 44px rgba(5, 150, 105, 0.14) !important;
-        border-color: #D1FAE5 !important;
+        border-color: var(--agri-light-muted) !important;
     }
 
     div[data-testid="stForm"] { animation: agriRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
@@ -2182,7 +2142,7 @@ st.markdown(
     div[data-testid="stAlert"] { animation: agriRise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
     div[data-testid="stTabs"] button[role="tab"]:hover {
-        background: rgba(5, 150, 105, 0.08) !important;
+        background: #EDF1E4 !important;
     }
 
     section[data-testid="stSidebar"] div[role="radiogroup"] label {
@@ -2191,17 +2151,14 @@ st.markdown(
     section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
         transform: translateX(3px);
     }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
-        animation: agriNavGlow 3s ease-in-out infinite;
-    }
 
     [data-testid="stVegaLiteChart"],
     [data-testid="stPlotlyChart"] {
         background: var(--glass-bg) !important;
         border: 1px solid var(--glass-border) !important;
         border-radius: var(--agri-radius) !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow: var(--glass-shadow) !important;
     }
 
@@ -2232,7 +2189,7 @@ st.markdown(
 
     div[data-baseweb="input"]:focus-within {
         border-color: var(--agri-green) !important;
-        box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.14) !important;
+        box-shadow: 0 0 0 3px #EDF1E4 !important;
     }
 
     div[data-testid="stNumberInput"] button {
@@ -2284,44 +2241,33 @@ st.markdown(
         width: 54px;
         height: 3px;
         border-radius: 3px;
-        background: linear-gradient(90deg, var(--agri-green), var(--agri-lime));
-        margin-top: 0.3rem;
+        background: #738A52;
+        margin-top: 0.35rem;
     }
 
     .hero-title {
-        background: linear-gradient(120deg, var(--agri-green-deep), var(--agri-green) 55%, #10B981);
+        background: none;
         -webkit-background-clip: text;
         background-clip: text;
         -webkit-text-fill-color: transparent;
     }
 
     .feature-icon {
-        transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+        transition: none;
     }
     .feature-card:hover .feature-icon {
-        transform: scale(1.12) rotate(-6deg);
+        transform: none;
     }
 
-    .feature-card::before {
-        transform-origin: left;
-        animation: agriAccentIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
-    }
-    .feature-card:hover::before { filter: brightness(1.08); }
-
-    @keyframes agriAccentIn {
-        from { transform: scaleX(0); }
-        to { transform: scaleX(1); }
-    }
+    .feature-card::before { content: none; }
 
     .stButton > button,
     .stFormSubmitButton > button {
-        background-size: 160% 160% !important;
-        background-position: 0% 50% !important;
+        background-size: auto !important;
     }
     .stButton > button:hover,
     .stFormSubmitButton > button:hover {
-        background-position: 100% 50% !important;
-        filter: brightness(1.04);
+        filter: none;
     }
 
     div[data-testid="stForm"],
@@ -2339,15 +2285,15 @@ st.markdown(
         right: 0;
         height: 26px;
         border-radius: 20px 20px 0 0;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent);
+        background: none;
         pointer-events: none;
     }
 
     hr {
         border: 0 !important;
         height: 1px;
-        background: linear-gradient(90deg, transparent, var(--agri-lime), var(--agri-green), transparent);
-        opacity: 0.5;
+        background: #E4E1D4;
+        opacity: 1;
         margin: 1.25rem 0;
     }
 
@@ -2376,7 +2322,7 @@ st.markdown(
         border-radius: 999px !important;
         background: var(--agri-green-light) !important;
         color: var(--agri-green-deep) !important;
-        border: 1px solid #A7F3D0 !important;
+        border: 1px solid #CFD8BE !important;
         font-weight: 600;
     }
     [data-baseweb="tag"] span,
@@ -2430,43 +2376,29 @@ st.markdown(
         height: 26px;
         padding: 0 9px;
         border-radius: 999px;
-        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime));
-        color: #FFFFFF;
+        background: #EDF1E4;
+        color: #29351D;
         font-size: 0.76rem;
         font-weight: 700;
-        box-shadow: 0 4px 12px rgba(5, 150, 105, 0.32);
+        box-shadow: none;
     }
 
     div[data-testid="stForm"]::after {
-        content: "";
-        position: absolute;
-        inset: -1px;
-        border-radius: 20px;
-        padding: 1.5px;
-        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime), var(--agri-green));
-        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-        -webkit-mask-composite: xor;
-        mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-        mask-composite: exclude;
-        opacity: 0;
-        transition: opacity 0.35s ease;
-        pointer-events: none;
-        z-index: 0;
+        content: none;
     }
     div[data-testid="stForm"]:hover::after,
-    div[data-testid="stForm"]:focus-within::after { opacity: 1; }
+    div[data-testid="stForm"]:focus-within::after { opacity: 0; }
 
     strong { color: var(--agri-green-deep); }
 
     .stMarkdown li::marker { color: var(--agri-green); font-weight: 700; }
 
     .stButton > button {
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-            0 8px 22px rgba(5, 150, 105, 0.26) !important;
+        box-shadow: none;
     }
 
     .brand:hover .brand-mark {
-        box-shadow: 0 0 0 6px rgba(52, 211, 153, 0.18);
+        box-shadow: none;
         transition: box-shadow 0.3s ease;
     }
 
@@ -2514,7 +2446,7 @@ st.markdown(
         gap: 8px;
         padding: 0.55rem 1rem;
         border-radius: 12px;
-        border: 1px dashed #A7F3D0;
+        border: 1px dashed #CFD8BE;
         background: rgba(209, 250, 229, 0.55);
         color: var(--agri-green-deep);
         font-size: 0.82rem;
@@ -2532,18 +2464,18 @@ st.markdown(
             background-color 0.25s ease !important;
     }
     .stButton > button:not(:disabled):hover {
-        transform: translateY(-1px);
+        transform: none;
     }
     .stButton > button:not(:disabled):active {
         transform: translateY(0) scale(0.97);
     }
 
     div[data-testid="stFormSubmitButton"] button:not(:disabled):hover {
-        transform: translateY(-1px);
-        box-shadow: 0 12px 28px rgba(5, 150, 105, 0.34) !important;
+        transform: none;
+        box-shadow: none;
     }
     div[data-testid="stFormSubmitButton"] button:focus-visible {
-        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.28) !important;
+        box-shadow: none;
     }
 
     div[data-testid="stMetric"] {
@@ -2551,16 +2483,15 @@ st.markdown(
             box-shadow 0.3s ease;
     }
     div[data-testid="stMetric"]:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 2px 0 0 var(--agri-lime), var(--glass-shadow) !important;
+        box-shadow: none;
     }
 
     .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 { letter-spacing: 0.3px; }
     [data-testid="stCaptionContainer"] { letter-spacing: 0.2px; }
 
     div[data-testid="stCodeBlock"] {
-        background: rgba(255, 255, 255, 0.72) !important;
-        backdrop-filter: blur(10px);
+        background: #FFFFFF !important;
+        backdrop-filter: none;
         border: 1px solid var(--agri-border);
         border-radius: 14px;
         overflow: hidden;
@@ -2585,37 +2516,37 @@ st.markdown(
         border-radius: 16px;
         height: 100%;
         border-color: #DDE7E2;
-        box-shadow: 0 8px 22px rgba(16, 24, 40, 0.06);
+        box-shadow: none;
         transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
     }
 
     [data-testid="stVerticalBlockBorderWrapper"]:has(.advisor-tile):hover {
-        transform: translateY(-3px);
-        border-color: #D1FAE5;
-        box-shadow: 0 16px 34px rgba(5, 150, 105, 0.16);
+        transform: none;
+        border-color: #43552F;
+        box-shadow: none;
     }
 
     [data-testid="stVerticalBlockBorderWrapper"] .advisor-tile {
         margin-bottom: 0.15rem;
     }
 
-    .feature-icon { transition: transform 0.3s ease; }
-    .feature-card:hover .feature-icon { transform: scale(1.12) rotate(-3deg); }
+    .feature-icon { transition: none; }
+    .feature-card:hover .feature-icon { transform: none; }
 
     .creators {
         margin-top: 1rem;
         padding: 1px;
-        border-radius: 16px;
-        background: linear-gradient(135deg, rgba(52, 211, 153, 0.6), rgba(6, 95, 70, 0.06) 48%, rgba(5, 150, 105, 0.45));
-        box-shadow: 0 18px 40px -22px rgba(5, 150, 105, 0.45);
+        border-radius: 12px;
+        background: #E4E1D4;
+        box-shadow: none;
         animation: agriRise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
     }
     .creators-inner {
-        background: rgba(255, 255, 255, 0.85);
-        -webkit-backdrop-filter: blur(14px);
-        backdrop-filter: blur(14px);
-        border-radius: 15px;
-        border: 1px solid rgba(255, 255, 255, 0.65);
+        background: #FFFFFF;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        border-radius: 11px;
+        border: none;
         padding: 0.9rem 1rem 1rem;
     }
     .creators-title {
@@ -2627,7 +2558,7 @@ st.markdown(
         font-weight: 800;
         letter-spacing: 0.16em;
         text-transform: uppercase;
-        background: linear-gradient(120deg, var(--agri-green-deep), var(--agri-green));
+        background: none;
         -webkit-background-clip: text;
         background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -2637,7 +2568,7 @@ st.markdown(
         content: "";
         flex: 1;
         height: 1px;
-        background: linear-gradient(90deg, rgba(6, 95, 70, 0.28), transparent);
+        background: #E4E1D4;
     }
     .creators ul { list-style: none; margin: 0; padding: 0; }
     .creators li {
@@ -2659,17 +2590,17 @@ st.markdown(
         width: 28px;
         height: 28px;
         border-radius: 50%;
-        background: linear-gradient(135deg, #065f46, #10b981);
+        background: #43552F;
         color: #FFFFFF;
         font-size: 0.68rem;
         font-weight: 800;
         letter-spacing: 0.03em;
-        box-shadow: 0 4px 12px -3px rgba(5, 150, 105, 0.55);
+        box-shadow: none;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
     .creators li:hover .avatar {
-        transform: scale(1.08);
-        box-shadow: 0 6px 16px -4px rgba(5, 150, 105, 0.7);
+        transform: none;
+        box-shadow: none;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -2696,14 +2627,14 @@ st.markdown(
         border: 1px solid var(--agri-border) !important;
         font-weight: 700 !important;
         box-shadow: var(--glass-shadow) !important;
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
     .st-key-home_top button:hover {
         background: #FFFFFF !important;
         border-color: var(--agri-green) !important;
-        box-shadow: 0 10px 24px rgba(5, 150, 105, 0.22) !important;
-        transform: translateY(-1px);
+        box-shadow: none;
+        transform: none;
     }
     @media (max-width: 640px) {
         .st-key-home_top { top: 0.6rem; right: 0.75rem; }
@@ -2713,24 +2644,50 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 14px;
-        margin: 1rem 0 1.25rem;
-        padding: 1.4rem 1.5rem;
-        border-radius: 20px;
-        border: 1px solid var(--glass-border);
-        background: linear-gradient(135deg, #ECFDF5 0%, rgba(255, 255, 255, 0.65) 70%);
-        box-shadow: var(--glass-shadow);
-        backdrop-filter: var(--glass-blur);
-        -webkit-backdrop-filter: var(--glass-blur);
+        margin: 0 0 0.4rem;
+        padding: 0 0 1.1rem;
+        border: none;
+        border-bottom: 1px solid var(--agri-border);
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
-    .login-mark { font-size: 2.1rem; line-height: 1; }
+    .login-mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 10px;
+        background: var(--agri-olive, #43552F);
+        font-size: 22px;
+    }
     .login-brand {
         font-family: var(--agri-font-heading);
         font-weight: 700;
-        font-size: 1.55rem;
-        color: var(--agri-green-deep);
+        font-size: 1.4rem;
+        color: var(--agri-text);
         letter-spacing: -0.02em;
     }
-    .login-tag { color: var(--agri-muted); font-size: 0.9rem; }
+    .login-tag { color: var(--agri-light-muted); font-size: 0.88rem; }
+
+    .login-shell {
+        border: 1px solid var(--agri-border);
+        border-radius: 16px;
+        background: #FFFFFF;
+        padding: 1.75rem 1.9rem 1.9rem;
+        margin-top: 1rem;
+    }
+    .login-eyebrow {
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--agri-light-muted);
+        margin-bottom: 0.35rem;
+    }
 
     .whoami {
         margin: 0.35rem 0 0.6rem;
@@ -2881,9 +2838,11 @@ def render_login_page():
         on_click=_advisor_back,
         icon=":material/arrow_back:",
     )
-    _, mid, _ = st.columns([1, 1.25, 1])
+    _, mid, _ = st.columns([1, 1.1, 1])
     with mid:
         st.markdown(
+            '<div class="login-shell">'
+            '<div class="login-eyebrow">Sign in</div>'
             '<div class="login-head">'
             '<span class="login-mark">🌱</span>'
             "<div>"
@@ -2902,16 +2861,16 @@ def render_login_page():
             key="auth_mode",
         )
 
-        role_label = "👨‍🌾 Farmer"
+        role_label = "Farmer"
         if mode == "Register":
             role_label = st.radio(
                 "Account type",
-                ["👨‍🌾 Farmer", "🛒 Buyer"],
+                ["Farmer", "Buyer"],
                 horizontal=True,
                 label_visibility="collapsed",
                 key="auth_role",
             )
-        role = "farmer" if role_label.startswith("👨") else "buyer"
+        role = "farmer" if role_label == "Farmer" else "buyer"
 
         if mode == "Log in":
             with st.form("login"):
@@ -3019,6 +2978,7 @@ def render_login_page():
             "View listings, reports and every page without an account. "
             "Signing in is only needed to buy or sell."
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 _auth_now = st.session_state.get("auth")
@@ -3147,10 +3107,16 @@ if page == "🌱 Crop Advisor":
 
 elif page == "🏠 Home":
 
+    _home_greet = (
+        f"Welcome, {html.escape(str(auth['name']))}"
+        if auth["role"] != "guest"
+        else "Welcome to AgriConnect"
+    )
+
     st.markdown(
-        """
+        f"""
         <div class="hero">
-            <div class="hero-title">🌱 Welcome to AgriConnect</div>
+            <div class="hero-title">{_home_greet}</div>
             <div class="hero-subtitle">
                 A modern digital marketplace connecting farmers and buyers
                 while making agricultural produce easier to manage, discover, and sell.
@@ -3161,7 +3127,7 @@ elif page == "🏠 Home":
     )
 
     st.button(
-        "🌱 Try the Crop Advisor — find out what to grow",
+        "Try the Crop Advisor — find out what to grow",
         key="home_advisor_cta",
         on_click=_go_to,
         args=("🌱 Crop Advisor",),
