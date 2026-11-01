@@ -2785,7 +2785,82 @@ st.markdown(
         background: var(--agri-green-soft) !important;
         border-color: var(--agri-green) !important;
     }
-</style>
+
+    /* Hide sidebar completely */
+    section[data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarNavSeparator"] { display: none !important; }
+    button[kind="headerNoPadding"][aria-label="Open sidebar"] { display: none !important; }
+
+    /* Topbar dock */
+    .agri-dock {
+        position: sticky;
+        top: 0.5rem;
+        z-index: 999;
+        margin: -1rem -1rem 1.5rem -1rem;
+        padding: 0.5rem 1rem;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(16px) saturate(140%);
+        -webkit-backdrop-filter: blur(16px) saturate(140%);
+        border-bottom: 1px solid rgba(5, 150, 105, 0.15);
+        border-radius: 0 0 16px 16px;
+        box-shadow: 0 4px 20px rgba(5, 150, 105, 0.08);
+    }
+    .agri-dock-inner {
+        max-width: 1180px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    .agri-dock-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.4rem 0.8rem 0.4rem 0.4rem;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(5, 150, 105, 0.1), rgba(52, 211, 153, 0.08));
+        border: 1px solid rgba(5, 150, 105, 0.2);
+    }
+    .agri-dock-mark { font-size: 1.4rem; }
+    .agri-dock-name {
+        font-family: var(--agri-font-heading);
+        font-weight: 700;
+        color: var(--agri-green-deep);
+        font-size: 0.95rem;
+    }
+    .agri-dock-nav {
+        display: flex;
+        gap: 0.3rem;
+        flex: 1;
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+    .agri-dock-item {
+        padding: 0.5rem 0.9rem;
+        border-radius: 10px;
+        border: none;
+        background: transparent;
+        color: var(--agri-text);
+        font-weight: 600;
+        font-size: 0.88rem;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .agri-dock-item:hover {
+        background: rgba(5, 150, 105, 0.08);
+        color: var(--agri-green-deep);
+    }
+    .agri-dock-item.active {
+        background: linear-gradient(135deg, var(--agri-green), var(--agri-lime));
+        color: white;
+        box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+    }
+    [data-testid="stMainBlockContainer"] {
+        padding-top: 1rem !important;
+    }
+
+    </style>
     """,
     unsafe_allow_html=True,
 )
@@ -3087,78 +3162,89 @@ if not st.session_state.get("auth"):
     st.stop()
 
 
-with st.sidebar:
-    st.markdown(
-        """
-        <div class="brand">
-            <div class="brand-mark">🌱</div>
-            <div>
-                <div class="brand-name">AgriConnect</div>
-                <div class="brand-tag">Farm-to-market marketplace</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+auth = st.session_state["auth"]
+_nav_opts = _nav_options(auth["role"])
+if st.session_state.get("nav") not in _nav_opts:
+    st.session_state["nav"] = "🏠 Home"
+if st.session_state.get("force_page") and st.session_state["force_page"] in _nav_opts:
+    st.session_state["nav"] = st.session_state.pop("force_page")
+else:
+    st.session_state.pop("force_page", None)
+page = st.session_state["nav"]
 
-    st.markdown('<div class="nav-label">Menu</div>', unsafe_allow_html=True)
+# Top dock navigation
+dock_items = []
+for ni in _nav_opts:
+    active = " active" if ni == page else ""
+    dock_items.append(f'<button class="agri-dock-item{active}" data-nav="{html.escape(ni)}">{html.escape(ni)}</button>')
 
-    auth = st.session_state["auth"]
-    _nav_opts = _nav_options(auth["role"])
-    if st.session_state.get("nav") not in _nav_opts:
-        st.session_state["nav"] = "🏠 Home"
+user_info = ""
+if auth["role"] == "guest":
+    user_info = '<button class="agri-dock-item" data-action="login">Log in</button>'
+else:
+    user_info = f'<span style="color: var(--agri-muted); font-size: 0.85rem;">{html.escape(auth["name"])} · {auth["role"].title()}</span><button class="agri-dock-item" data-action="logout">Log out</button>'
 
-    page = st.radio(
-        "Navigate",
-        _nav_opts,
-        key="nav",
-        label_visibility="collapsed",
-        on_change=_nav_changed,
-    )
-    if st.session_state.get("force_page"):
-        page = st.session_state["force_page"]
+st.markdown(f"""
+<div class="agri-dock">
+  <div class="agri-dock-inner">
+    <div class="agri-dock-brand" data-nav="🏠 Home" style="cursor:pointer;">
+      <span class="agri-dock-mark">🌱</span>
+      <span class="agri-dock-name">AgriConnect</span>
+    </div>
+    <div class="agri-dock-nav">
+      {"".join(dock_items)}
+    </div>
+    <div style="display:flex; align-items:center; gap:0.5rem;">
+      {user_info}
+    </div>
+  </div>
+</div>
+<script>
+(function(){{
+  const root = window.parent.document;
+  if(root.querySelector('#agri-dock-js')) return;
+  const s = root.createElement('script');
+  s.id = 'agri-dock-js';
+  s.textContent = `
+(function(){{
+  const d = window.parent.document;
+  d.addEventListener('click', function(e){{
+    const btn = e.target.closest('.agri-dock-item, .agri-dock-brand');
+    if(!btn) return;
+    e.preventDefault();
+    if(btn.dataset.nav){{
+      const target = btn.dataset.nav;
+      // Try to find and click the radio option
+      const labels = d.querySelectorAll('label[data-testid="stRadioOption"]');
+      for(let i=0; i<labels.length; i++){{
+        if((labels[i].textContent||'').includes(target.replace(/^[^ ]+ /,'')) || (labels[i].textContent||'').trim() === target){{
+          const inp = labels[i].querySelector('input[type="radio"]');
+          if(inp){{ inp.click(); labels[i].click(); return; }}
+          labels[i].click(); return;
+        }}
+      }}
+    }}
+    if(btn.dataset.action === 'logout'){{
+      const b = d.querySelector('.st-key-logout button');
+      if(b) b.click();
+    }}
+    if(btn.dataset.action === 'login'){{
+      const b = d.querySelector('.st-key-guest_login button');
+      if(b) b.click();
+    }}
+  }}, true);
+}})();
+`;
+  root.body.appendChild(s);
+}})();
+</script>
+""", unsafe_allow_html=True)
 
-    if auth["role"] == "guest":
-        st.markdown(
-            '<div class="whoami">Browsing as <b>Guest</b>'
-            '<span class="whoami-role">Guest</span></div>',
-            unsafe_allow_html=True,
-        )
-        st.button(
-            "Log in",
-            key="guest_login",
-            on_click=_logout,
-            icon=":material/login:",
-            use_container_width=True,
-        )
-    else:
-        st.markdown(
-            f'<div class="whoami">Signed in as <b>{html.escape(str(auth["name"]))}</b>'
-            f'<span class="whoami-role">{auth["role"].title()}</span></div>',
-            unsafe_allow_html=True,
-        )
-        st.button("Log out", key="logout", on_click=_logout, use_container_width=True)
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown(
-        """
-        <div class="creators">
-            <div class="creators-inner">
-                <div class="creators-title">Creators</div>
-                <ul>
-                    <li><span class="avatar">JB</span><span>Joseph Boby</span></li>
-                    <li><span class="avatar">KS</span><span>Kuriakose Sebastion</span></li>
-                    <li><span class="avatar">SS</span><span>Sujith S</span></li>
-                    <li><span class="avatar">NK</span><span>Niranjana S Kummar</span></li>
-                </ul>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-st.button("🏠 Home", key="home_top", on_click=_go_home, help="Go to the home page")
+# Keep hidden buttons for JS to trigger
+st.markdown('<div style="display:none">', unsafe_allow_html=True)
+st.button("logout", key="logout", on_click=_logout)
+st.button("login", key="guest_login", on_click=_logout)
+st.markdown('</div>', unsafe_allow_html=True)
 
 _db_banner = st.empty()
 
